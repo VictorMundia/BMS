@@ -2,8 +2,8 @@ services:
   - type: web
     name: bms
     env: python
-    buildCommand: pip install -r requirements.txt && python manage.py migrate --noinput && python manage.py create_superuser_if_not_exists
-    startCommand: gunicorn butchery_system.wsgi:application
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash start.sh
     envVars:
       - key: SECRET_KEY
         generateValue: true
