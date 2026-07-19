@@ -3,7 +3,7 @@ services:
     name: bms
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: bash start.sh
+    startCommand: gunicorn butchery_system.wsgi:application
     envVars:
       - key: SECRET_KEY
         generateValue: true
