@@ -69,19 +69,15 @@ WSGI_APPLICATION = 'butchery_system.wsgi.application'
 
 
 # Database
-# Using SQLite for local development. To use PostgreSQL, comment out the
-# SQLite config below and uncomment the PostgreSQL config.
+# Use PostgreSQL on Render (when DATABASE_URL is set), otherwise SQLite for local dev
+import dj_database_url
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=config('DATABASE_URL', default='sqlite:///db.sqlite3'),
+        conn_max_age=600,
+        ssl_require=True,
+    )
 }
-
-# Use PostgreSQL on Render (when DATABASE_URL is set)
-if config('DATABASE_URL', default=None):
-    import dj_database_url
-    DATABASES['default'] = dj_database_url.config(config('DATABASE_URL'), conn_max_age=600, ssl_require=True)
 
 
 # Password validation
