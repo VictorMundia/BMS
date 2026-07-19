@@ -78,16 +78,10 @@ DATABASES = {
     }
 }
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': config('DB_NAME', default='bms_db'),
-#         'USER': config('DB_USER', default='postgres'),
-#         'PASSWORD': config('DB_PASSWORD', default='postgres'),
-#         'HOST': config('DB_HOST', default='localhost'),
-#         'PORT': config('DB_PORT', default='5432'),
-#     }
-# }
+# Use PostgreSQL on Render (when DATABASE_URL is set)
+if config('DATABASE_URL', default=None):
+    import dj_database_url
+    DATABASES['default'] = dj_database_url.config(config('DATABASE_URL'), conn_max_age=600, ssl_require=True)
 
 
 # Password validation

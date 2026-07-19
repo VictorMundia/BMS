@@ -19,3 +19,6 @@ databases:
   - name: bms-db
     databaseName: bms
     user: bms
+
+# Run migrations after database is created
+preDeployCommand: python manage.py migrate --noinput
