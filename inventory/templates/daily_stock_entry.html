@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+{% block title %}Daily Stock Entry - BMS{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center justify-between mb-6 gap-3">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Daily Stock & Expenses</h1>
+        <p class="text-gray-500">Record what was received and what remains at the end of the day.</p>
+    </div>
+</div>
+
+<!-- Branch / date selector -->
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5 mb-6">
+    <form method="get" class="flex flex-wrap items-end gap-3">
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Branch</label>
+            {% if locked_branch %}
+                <input type="text" value="{{ locked_branch.name }}" disabled
+                       class="bg-gray-100 border border-gray-300 text-gray-700 text-sm rounded-lg p-2.5">
+            {% else %}
+                <select name="butchery" onchange="this.form.submit()"
+                        class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5 min-w-[12rem]">
+                    {% for b in branches %}
+                        <option value="{{ b.id }}" {% if selected and selected.id == b.id %}selected{% endif %}>{{ b.name }}</option>
+                    {% endfor %}
+                </select>
+            {% endif %}
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Date</label>
+            <input type="date" name="date" value="{{ date }}" onchange="this.form.submit()"
+                   class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5">
+        </div>
+        <button class="bg-gray-800 hover:bg-gray-900 text-white text-sm rounded-lg px-4 py-2.5">Load</button>
+    </form>
+</div>
+
+{% if selected %}
+<form method="post" id="entry-form">
+    {% csrf_token %}
+    <input type="hidden" name="butchery" value="{{ selected.id }}">
+    <input type="hidden" name="date" value="{{ date }}">
+
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">{{ selected.name }} — Stock ({{ date }})</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm text-left text-gray-600">
+                <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-3">Product</th>
+                        <th class="px-3 py-3">Opening</th>
+                        <th class="px-3 py-3">Received</th>
+                        <th class="px-3 py-3">Wastage</th>
+                        <th class="px-3 py-3">Remaining</th>
+                        <th class="px-3 py-3">Sold</th>
+                        <th class="px-3 py-3">Revenue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr class="border-b stock-row"
+                        data-selling="{{ row.product.selling_price }}"
+                        data-opening="{{ row.opening }}">
+                        <td class="px-3 py-2 font-medium text-gray-900">
+                            {{ row.product.name }}
+                            <span class="text-xs text-gray-400">({{ row.product.get_unit_display }})</span>
+                        </td>
+                        <td class="px-3 py-2 opening-cell">{{ row.opening }}</td>
+                        <td class="px-3 py-2">
+                            <input type="number" step="0.01" min="0" name="received_{{ row.product.id }}"
+                                   value="{{ row.received }}" class="received w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
+                        </td>
+                        <td class="px-3 py-2">
+                            <input type="number" step="0.01" min="0" name="wastage_{{ row.product.id }}"
+                                   value="{{ row.wastage }}" class="wastage w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
+                        </td>
+                        <td class="px-3 py-2">
+                            <input type="number" step="0.01" min="0" name="closing_{{ row.product.id }}"
+                                   value="{{ row.closing }}" class="closing w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
+                        </td>
+                        <td class="px-3 py-2 sold-cell font-medium">0</td>
+                        <td class="px-3 py-2 revenue-cell font-medium">0.00</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="bg-gray-50 font-semibold text-gray-900">
+                        <td class="px-3 py-3" colspan="6">Estimated Revenue</td>
+                        <td class="px-3 py-3" id="total-revenue">0.00</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">Expenses for the day</h2>
+            <button type="button" id="add-expense" class="text-white bg-gray-800 hover:bg-gray-900 font-medium rounded-lg text-sm px-4 py-2">+ Add Expense</button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm text-left text-gray-600">
+                <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-3">Description</th>
+                        <th class="px-3 py-3">Amount</th>
+                    </tr>
+                </thead>
+                <tbody id="expense-body">
+                    <!-- expense rows injected here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <template id="expense-row-template">
+        <tr>
+            <td class="px-3 py-2">
+                <input type="text" name="exp_description" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="What was the expense?">
+            </td>
+            <td class="px-3 py-2">
+                <input type="number" step="0.01" min="0" name="exp_amount" class="w-28 bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="0.00">
+            </td>
+        </tr>
+    </template>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">M-Pesa Collections</h2>
+            <label class="block text-sm text-gray-500 mb-1">Total amount received via M-Pesa today</label>
+            <input type="number" step="0.01" min="0" name="mpesa_amount" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5" placeholder="0.00">
+            <p class="text-xs text-gray-400 mt-2">Cash at hand = Revenue - M-Pesa</p>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Notes to Owner</h2>
+            <label class="block text-sm text-gray-500 mb-1">Any message for the owner?</label>
+            <textarea name="notes" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 h-24 resize-none" placeholder="e.g., fridge not cooling well, need more charcoal..."></textarea>
+        </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+        <button type="submit" class="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-6 py-2.5">Save Day</button>
+        <a href="{% url 'home' %}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5">Cancel</a>
+    </div>
+</form>
+
+<script>
+(function(){
+    function recalc(){
+        let totalRev = 0;
+        document.querySelectorAll('.stock-row').forEach(function(row){
+            const opening = parseFloat(row.dataset.opening) || 0;
+            const selling = parseFloat(row.dataset.selling) || 0;
+            const received = parseFloat(row.querySelector('.received').value) || 0;
+            const wastage = parseFloat(row.querySelector('.wastage').value) || 0;
+            const closing = parseFloat(row.querySelector('.closing').value) || 0;
+            let sold = opening + received - wastage - closing;
+            if(sold < 0) sold = 0;
+            const rev = sold * selling;
+            row.querySelector('.sold-cell').textContent = sold.toFixed(2);
+            row.querySelector('.revenue-cell').textContent = rev.toFixed(2);
+            totalRev += rev;
+        });
+        document.getElementById('total-revenue').textContent = totalRev.toFixed(2);
+    }
+    document.getElementById('entry-form').addEventListener('input', recalc);
+
+    const tmpl = document.getElementById('expense-row-template');
+    document.getElementById('add-expense').addEventListener('click', function(){
+        document.getElementById('expense-body').appendChild(tmpl.content.cloneNode(true));
+    });
+
+    recalc();
+})();
+</script>
+{% else %}
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 text-center text-gray-400">
+    No branches found. Add a branch in the admin first.
+</div>
+{% endif %}
+{% endblock %}

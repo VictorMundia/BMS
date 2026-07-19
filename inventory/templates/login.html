@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Login - BMS{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-center min-h-[70vh]">
+    <div class="w-full max-w-md bg-white rounded-lg shadow-md border border-gray-100 p-8">
+        <div class="flex flex-col items-center mb-6">
+            <svg class="w-12 h-12 text-red-600 mb-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                <path d="M10 2a6 6 0 00-6 6c0 1.887.454 3.665 1.257 5.234a.75.75 0 00.668.416h8.15a.75.75 0 00.668-.416A11.945 11.945 0 0016 8a6 6 0 00-6-6zM5 16a1 1 0 011-1h8a1 1 0 011 1v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-1z"></path>
+            </svg>
+            <h1 class="text-2xl font-bold text-gray-900">Butchery Management System</h1>
+            <p class="text-sm text-gray-500">Sign in to your account</p>
+        </div>
+
+        {% if form.errors or messages %}
+            <div class="mb-4 p-3 rounded-lg bg-red-100 text-red-800 text-sm">
+                Invalid username or password. Please try again.
+            </div>
+        {% endif %}
+
+        <form method="post" action="{% url 'login' %}" class="space-y-5">
+            {% csrf_token %}
+            <div>
+                <label for="{{ form.username.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Username</label>
+                <input type="text" name="{{ form.username.html_name }}" id="{{ form.username.id_for_label }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5"
+                    placeholder="Enter username" required>
+            </div>
+            <div>
+                <label for="{{ form.password.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Password</label>
+                <input type="password" name="{{ form.password.html_name }}" id="{{ form.password.id_for_label }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5"
+                    placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="w-full text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center">Sign in</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

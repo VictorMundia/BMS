@@ -1,0 +1,65 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Butchery Management System{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/flowbite@2.2.1/dist/flowbite.min.css" rel="stylesheet" />
+</head>
+<body class="bg-gray-50 min-h-screen">
+    {% if user.is_authenticated %}
+    <nav class="bg-white border-b border-gray-200 shadow-sm">
+        <div class="max-w-screen-xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between">
+            <a href="{% if user.is_superuser %}{% url 'home' %}{% else %}{% url 'daily_stock_entry' %}{% endif %}" class="flex items-center space-x-2">
+                <svg class="w-7 h-7 text-red-600" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M10 2a6 6 0 00-6 6c0 1.887.454 3.665 1.257 5.234a.75.75 0 00.668.416h8.15a.75.75 0 00.668-.416A11.945 11.945 0 0016 8a6 6 0 00-6-6zM5 16a1 1 0 011-1h8a1 1 0 011 1v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-1z"></path>
+                </svg>
+                <span class="text-xl font-bold text-gray-900">BMS</span>
+            </a>
+            {% if user.is_superuser %}
+            <button data-collapse-toggle="navbar-menu" type="button" class="inline-flex items-center p-2 w-10 h-10 justify-center text-gray-500 rounded-lg md:hidden hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-200">
+                <svg class="w-5 h-5" aria-hidden="true" fill="none" viewBox="0 0 17 14" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 1h15M1 7h15M1 13h15"/>
+                </svg>
+            </button>
+            <div class="hidden w-full md:block md:w-auto" id="navbar-menu">
+                <ul class="flex flex-col md:flex-row md:space-x-4 mt-4 md:mt-0 font-medium text-sm">
+                    <li><a href="{% url 'home' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Dashboard</a></li>
+                    <li><a href="{% url 'daily_stock_entry' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Daily Entry</a></li>
+                    <li><a href="{% url 'daily_stock_history' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Stock History</a></li>
+                    <li><a href="{% url 'expense_list' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Expenses</a></li>
+                    <li><a href="{% url 'staff_list' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Staff</a></li>
+                    <li><a href="{% url 'reporting_dashboard' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Reports</a></li>
+                    <li><a href="{% url 'profit_loss_report' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">P&amp;L</a></li>
+                </ul>
+            </div>
+            {% else %}
+            <span class="text-sm font-medium text-gray-500">Daily Stock Entry</span>
+            {% endif %}
+            <div class="flex items-center space-x-4">
+                <span class="text-sm text-gray-600 hidden sm:inline">{{ user.username }}</span>
+                <a href="{% url 'logout' %}" class="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-4 py-2">Logout</a>
+            </div>
+        </div>
+    </nav>
+    {% endif %}
+
+    <main class="max-w-screen-xl mx-auto px-4 py-6">
+        {% if messages %}
+            <div class="mb-4 space-y-2">
+                {% for message in messages %}
+                    <div class="p-4 rounded-lg text-sm {% if message.tags == 'error' %}bg-red-100 text-red-800{% elif message.tags == 'success' %}bg-green-100 text-green-800{% else %}bg-blue-100 text-blue-800{% endif %}" role="alert">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/flowbite@2.2.1/dist/flowbite.min.js"></script>
+</body>
+</html>

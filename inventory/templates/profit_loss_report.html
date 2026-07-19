@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}Profit & Loss - BMS{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center justify-between mb-6 gap-3">
+    <h1 class="text-2xl font-bold text-gray-900">Profit &amp; Loss Report</h1>
+    <a href="{% url 'export_profit_loss' %}?butchery={{ selected_butchery }}&start_date={{ start_date }}&end_date={{ end_date }}"
+       class="text-white bg-green-600 hover:bg-green-700 font-medium rounded-lg text-sm px-5 py-2.5">Export CSV</a>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
+    <form method="get" class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <select name="butchery" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+            <option value="">All Butcheries</option>
+            {% for b in butcheries %}
+                <option value="{{ b.id }}" {% if selected_butchery == b.id|stringformat:'s' %}selected{% endif %}>{{ b.name }}</option>
+            {% endfor %}
+        </select>
+        <input type="date" name="start_date" value="{{ start_date }}" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+        <input type="date" name="end_date" value="{{ end_date }}" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+        <button type="submit" class="text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-4 py-2.5">Apply</button>
+    </form>
+</div>
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <p class="text-sm text-gray-500">Revenue</p>
+        <p class="text-2xl font-bold text-gray-900">{{ total_revenue }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <p class="text-sm text-gray-500">COGS</p>
+        <p class="text-2xl font-bold text-gray-900">{{ total_cogs }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <p class="text-sm text-gray-500">Gross Profit</p>
+        <p class="text-2xl font-bold {% if gross_profit >= 0 %}text-green-600{% else %}text-red-600{% endif %}">{{ gross_profit }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <p class="text-sm text-gray-500">Expenses</p>
+        <p class="text-2xl font-bold text-gray-900">{{ total_expenses }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <p class="text-sm text-gray-500">Net Profit</p>
+        <p class="text-2xl font-bold {% if net_profit >= 0 %}text-green-600{% else %}text-red-600{% endif %}">{{ net_profit }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <p class="text-sm text-gray-500">Wastage Cost</p>
+        <p class="text-2xl font-bold text-red-600">{{ wastage_cost }}</p>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Per-Product Breakdown</h2>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-600">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3">Product</th>
+                    <th class="px-4 py-3">Qty Sold</th>
+                    <th class="px-4 py-3">Revenue</th>
+                    <th class="px-4 py-3">COGS</th>
+                    <th class="px-4 py-3">Gross Profit</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in per_product %}
+                <tr class="border-b">
+                    <td class="px-4 py-3 font-medium text-gray-900">{{ row.name }}</td>
+                    <td class="px-4 py-3">{{ row.sold|floatformat:2 }}</td>
+                    <td class="px-4 py-3">{{ row.revenue|floatformat:2 }}</td>
+                    <td class="px-4 py-3">{{ row.cogs|floatformat:2 }}</td>
+                    <td class="px-4 py-3 {% if row.gross_profit >= 0 %}text-green-600{% else %}text-red-600{% endif %}">{{ row.gross_profit|floatformat:2 }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="px-4 py-3 text-center text-gray-400">No sales in this period.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

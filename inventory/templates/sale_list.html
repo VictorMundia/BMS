@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}Sales - BMS{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Sales</h1>
+    <a href="{% url 'sale_create' %}" class="text-white bg-emerald-600 hover:bg-emerald-700 font-medium rounded-lg text-sm px-5 py-2.5">Record Sale</a>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+    {% include 'partials/_search_filter.html' %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-600">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3">Receipt</th>
+                    <th class="px-4 py-3">Date</th>
+                    <th class="px-4 py-3">Butchery</th>
+                    <th class="px-4 py-3">Customer</th>
+                    <th class="px-4 py-3">Total</th>
+                    <th class="px-4 py-3">Method</th>
+                    <th class="px-4 py-3"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sale in page_obj %}
+                <tr class="border-b">
+                    <td class="px-4 py-3 font-medium text-gray-900">{{ sale.receipt_number }}</td>
+                    <td class="px-4 py-3">{{ sale.date|date:"M d, Y H:i" }}</td>
+                    <td class="px-4 py-3">{{ sale.butchery.name }}</td>
+                    <td class="px-4 py-3">{{ sale.customer_name|default:"-" }}</td>
+                    <td class="px-4 py-3">{{ sale.total_amount }}</td>
+                    <td class="px-4 py-3">{{ sale.get_payment_method_display }}</td>
+                    <td class="px-4 py-3"><a href="{% url 'sale_receipt' sale.pk %}" class="text-red-600 hover:underline">Receipt</a></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="px-4 py-3 text-center text-gray-400">No sales found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% include 'partials/_pagination.html' %}
+</div>
+{% endblock %}

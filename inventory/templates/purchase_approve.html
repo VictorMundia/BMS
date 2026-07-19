@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}Approve Purchase - BMS{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <h1 class="text-xl font-bold text-gray-900 mb-6">Approve Purchase Order #{{ purchase.pk }}</h1>
+
+        <dl class="divide-y divide-gray-100 text-sm mb-6">
+            <div class="flex justify-between py-2"><dt class="text-gray-500">Supplier</dt><dd class="font-medium text-gray-900">{{ purchase.supplier.name }}</dd></div>
+            <div class="flex justify-between py-2"><dt class="text-gray-500">Butchery</dt><dd class="font-medium text-gray-900">{{ purchase.butchery.name }}</dd></div>
+            <div class="flex justify-between py-2"><dt class="text-gray-500">Date</dt><dd class="font-medium text-gray-900">{{ purchase.date }}</dd></div>
+            <div class="flex justify-between py-2"><dt class="text-gray-500">Total Amount</dt><dd class="font-medium text-gray-900">{{ purchase.total_amount }}</dd></div>
+            <div class="flex justify-between py-2"><dt class="text-gray-500">Status</dt><dd class="font-medium text-gray-900">{{ purchase.get_payment_status_display }}</dd></div>
+        </dl>
+
+        <h2 class="text-lg font-semibold text-gray-900 mb-3">Items</h2>
+        <table class="w-full text-sm text-left text-gray-600 mb-6">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr><th class="px-4 py-3">Product</th><th class="px-4 py-3">Qty</th><th class="px-4 py-3">Unit Price</th><th class="px-4 py-3">Total</th></tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr class="border-b">
+                    <td class="px-4 py-3 font-medium text-gray-900">{{ item.product.name }}</td>
+                    <td class="px-4 py-3">{{ item.quantity }}</td>
+                    <td class="px-4 py-3">{{ item.unit_price }}</td>
+                    <td class="px-4 py-3">{{ item.get_total }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="px-4 py-3 text-center text-gray-400">No items.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if purchase.payment_status == 'DRAFT' %}
+        <form method="post" class="flex items-center gap-3">
+            {% csrf_token %}
+            <button type="submit" name="action" value="approve" class="text-white bg-green-600 hover:bg-green-700 font-medium rounded-lg text-sm px-5 py-2.5">Approve</button>
+            <button type="submit" name="action" value="reject" class="text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-5 py-2.5">Reject</button>
+            <a href="{% url 'purchase_list' %}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5">Cancel</a>
+        </form>
+        {% else %}
+        <p class="text-sm text-gray-500">This purchase is not in DRAFT status and cannot be approved here.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

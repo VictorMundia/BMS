@@ -1,0 +1,179 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard - BMS{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center justify-between mb-6 gap-3">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Owner Dashboard</h1>
+        <p class="text-gray-500">Live portfolio{% if selected_branch_id %} for selected branch{% else %} across all branches{% endif %}{% if is_today %} — auto-updating{% endif %}.</p>
+    </div>
+    <form method="get" class="flex items-end gap-2">
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Branch</label>
+            <select name="branch_id" onchange="this.form.submit()" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5 min-w-[12rem]">
+                <option value="">All Branches</option>
+                {% for b in branches %}
+                    <option value="{{ b.id }}" {% if selected_branch_id == b.id|stringformat:'s' %}selected{% endif %}>{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Date</label>
+            <input type="date" name="date" value="{{ date_str }}" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5">
+        </div>
+        <button class="bg-gray-800 hover:bg-gray-900 text-white text-sm rounded-lg px-4 py-2.5">View</button>
+        <span id="live-badge" class="hidden items-center gap-1 text-xs text-green-600"><span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> Live</span>
+    </form>
+</div>
+
+<div class="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4 mb-8">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
+        <p class="text-xs text-gray-500">Stock Value</p>
+        <p class="text-xl font-bold text-gray-900" id="kpi-stock_value">{{ totals.stock_value|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
+        <p class="text-xs text-gray-500">Revenue</p>
+        <p class="text-xl font-bold text-emerald-600" id="kpi-revenue">{{ totals.revenue|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
+        <p class="text-xs text-gray-500">M-Pesa</p>
+        <p class="text-xl font-bold text-purple-600" id="kpi-mpesa_amount">{{ totals.mpesa_amount|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
+        <p class="text-xs text-gray-500">Cash at Hand</p>
+        <p class="text-xl font-bold text-green-600" id="kpi-cash_at_hand">{{ totals.cash_at_hand|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
+        <p class="text-xs text-gray-500">Cost of Sales</p>
+        <p class="text-xl font-bold text-gray-900" id="kpi-cogs">{{ totals.cogs|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
+        <p class="text-xs text-gray-500">Gross Profit</p>
+        <p class="text-xl font-bold text-blue-600" id="kpi-gross_profit">{{ totals.gross_profit|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
+        <p class="text-xs text-gray-500">Expenses</p>
+        <p class="text-xl font-bold text-red-600" id="kpi-expenses">{{ totals.expenses|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
+        <p class="text-xs text-gray-500">Net Profit</p>
+        <p class="text-xl font-bold text-gray-900" id="kpi-net_profit">{{ totals.net_profit|floatformat:2 }}</p>
+    </div>
+</div>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+    <a href="{% url 'daily_stock_entry' %}" class="flex items-center justify-center text-center bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg px-4 py-4 text-sm">Record Daily Stock</a>
+    <a href="{% url 'expense_create' %}" class="flex items-center justify-center text-center bg-gray-800 hover:bg-gray-900 text-white font-medium rounded-lg px-4 py-4 text-sm">Add Expense</a>
+    <a href="{% url 'reporting_dashboard' %}" class="flex items-center justify-center text-center bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-4 py-4 text-sm">Reports</a>
+    <a href="{% url 'profit_loss_report' %}" class="flex items-center justify-center text-center bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg px-4 py-4 text-sm">Profit &amp; Loss</a>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Branch Performance — {{ date_str }}</h2>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-600">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3">Branch</th>
+                    <th class="px-4 py-3">Entries</th>
+                    <th class="px-4 py-3">Revenue</th>
+                    <th class="px-4 py-3">M-Pesa</th>
+                    <th class="px-4 py-3">Cash at Hand</th>
+                    <th class="px-4 py-3">Gross Profit</th>
+                    <th class="px-4 py-3">Expenses</th>
+                    <th class="px-4 py-3">Net Profit</th>
+                    <th class="px-4 py-3">Stock Value</th>
+                </tr>
+            </thead>
+            <tbody id="branch-body">
+                {% for b in per_branch %}
+                <tr class="border-b">
+                    <td class="px-4 py-3 font-medium text-gray-900">
+                        <a href="{% url 'daily_stock_readonly' %}?butchery_id={{ b.butchery.id }}&date={{ date_str }}" class="text-blue-600 hover:underline">{{ b.butchery.name }}</a>
+                    </td>
+                    <td class="px-4 py-3">{{ b.entries }}</td>
+                    <td class="px-4 py-3">{{ b.revenue|floatformat:2 }}</td>
+                    <td class="px-4 py-3 text-purple-600">{{ b.mpesa_amount|floatformat:2 }}</td>
+                    <td class="px-4 py-3 text-green-600">{{ b.cash_at_hand|floatformat:2 }}</td>
+                    <td class="px-4 py-3 text-blue-600">{{ b.gross_profit|floatformat:2 }}</td>
+                    <td class="px-4 py-3 text-red-600">{{ b.expenses|floatformat:2 }}</td>
+                    <td class="px-4 py-3 font-semibold">{{ b.net_profit|floatformat:2 }}</td>
+                    <td class="px-4 py-3">{{ b.stock_value|floatformat:2 }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="px-4 py-3 text-center text-gray-400">No branches yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h2>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-600">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3">Product</th>
+                    <th class="px-4 py-3">Type</th>
+                    <th class="px-4 py-3">Quantity</th>
+                    <th class="px-4 py-3">Recorded By</th>
+                    <th class="px-4 py-3">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for movement in recent_activities %}
+                <tr class="border-b">
+                    <td class="px-4 py-3 font-medium text-gray-900">{{ movement.product.name }}</td>
+                    <td class="px-4 py-3">{{ movement.get_movement_type_display }}</td>
+                    <td class="px-4 py-3">{{ movement.quantity }}</td>
+                    <td class="px-4 py-3">{{ movement.recorded_by.username|default:"-" }}</td>
+                    <td class="px-4 py-3">{{ movement.timestamp }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="px-4 py-3 text-center text-gray-400">No recent activity.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function(){
+    const isToday = {{ is_today|yesno:"true,false" }};
+    if(!isToday) return;
+    const badge = document.getElementById('live-badge');
+    if(badge){ badge.classList.remove('hidden'); badge.classList.add('inline-flex'); }
+    const fmt = n => Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+    const branchId = "{{ selected_branch_id|default:'' }}";
+    async function refresh(){
+        try{
+            let url = "{% url 'dashboard_data' %}?date={{ date_str }}";
+            if(branchId) url += "&branch_id=" + branchId;
+            const r = await fetch(url);
+            const d = await r.json();
+            ['stock_value','revenue','mpesa_amount','cash_at_hand','cogs','gross_profit','expenses','net_profit'].forEach(k => {
+                const el = document.getElementById('kpi-'+k);
+                if(el) el.textContent = fmt(d.totals[k]);
+            });
+            const body = document.getElementById('branch-body');
+            if(body && d.per_branch.length){
+                body.innerHTML = d.per_branch.map(b => `
+                    <tr class="border-b">
+                        <td class="px-4 py-3 font-medium text-gray-900">${b.name}</td>
+                        <td class="px-4 py-3">${b.entries}</td>
+                        <td class="px-4 py-3">${fmt(b.revenue)}</td>
+                        <td class="px-4 py-3 text-purple-600">${fmt(b.mpesa_amount)}</td>
+                        <td class="px-4 py-3 text-green-600">${fmt(b.cash_at_hand)}</td>
+                        <td class="px-4 py-3 text-blue-600">${fmt(b.gross_profit)}</td>
+                        <td class="px-4 py-3 text-red-600">${fmt(b.expenses)}</td>
+                        <td class="px-4 py-3 font-semibold">${fmt(b.net_profit)}</td>
+                        <td class="px-4 py-3">${fmt(b.stock_value)}</td>
+                    </tr>`).join('');
+            }
+        }catch(e){}
+    }
+    setInterval(refresh, 15000);
+})();
+</script>
+{% endblock %}

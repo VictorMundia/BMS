@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}Approve Transfer - BMS{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <h1 class="text-xl font-bold text-gray-900 mb-6">Approve Stock Transfer</h1>
+
+        <dl class="divide-y divide-gray-100 text-sm mb-6">
+            <div class="flex justify-between py-2"><dt class="text-gray-500">Product</dt><dd class="font-medium text-gray-900">{{ transfer.product.name }}</dd></div>
+            <div class="flex justify-between py-2"><dt class="text-gray-500">Quantity</dt><dd class="font-medium text-gray-900">{{ transfer.quantity }}</dd></div>
+            <div class="flex justify-between py-2"><dt class="text-gray-500">From</dt><dd class="font-medium text-gray-900">{{ transfer.from_butchery.name }}</dd></div>
+            <div class="flex justify-between py-2"><dt class="text-gray-500">To</dt><dd class="font-medium text-gray-900">{{ transfer.to_butchery.name }}</dd></div>
+            <div class="flex justify-between py-2"><dt class="text-gray-500">Requested By</dt><dd class="font-medium text-gray-900">{{ transfer.requested_by.username|default:"-" }}</dd></div>
+            <div class="flex justify-between py-2"><dt class="text-gray-500">Status</dt><dd class="font-medium text-gray-900">{{ transfer.get_status_display }}</dd></div>
+            {% if transfer.notes %}<div class="flex justify-between py-2"><dt class="text-gray-500">Notes</dt><dd class="font-medium text-gray-900">{{ transfer.notes }}</dd></div>{% endif %}
+        </dl>
+
+        {% if transfer.status == 'PENDING' %}
+        <form method="post" class="flex items-center gap-3">
+            {% csrf_token %}
+            <button type="submit" name="action" value="approve" class="text-white bg-green-600 hover:bg-green-700 font-medium rounded-lg text-sm px-5 py-2.5">Approve</button>
+            <button type="submit" name="action" value="reject" class="text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-5 py-2.5">Reject</button>
+            <a href="{% url 'home' %}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5">Cancel</a>
+        </form>
+        {% else %}
+        <p class="text-sm text-gray-500">This transfer has already been {{ transfer.get_status_display|lower }}.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

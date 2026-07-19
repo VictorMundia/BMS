@@ -1,0 +1,25 @@
+{% comment %}Reusable pagination. Expects: page_obj, request.{% endcomment %}
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="flex items-center justify-between mt-5" aria-label="Pagination">
+    <span class="text-sm text-gray-600">
+        Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+    </span>
+    <ul class="inline-flex -space-x-px text-sm">
+        {% if page_obj.has_previous %}
+        <li>
+            <a href="?page={{ page_obj.previous_page_number }}&q={{ request.GET.q }}&start_date={{ request.GET.start_date }}&end_date={{ request.GET.end_date }}&butchery_id={{ request.GET.butchery_id }}"
+               class="flex items-center justify-center px-3 h-9 leading-tight text-gray-500 bg-white border border-gray-300 rounded-l-lg hover:bg-gray-100 hover:text-gray-700">Previous</a>
+        </li>
+        {% endif %}
+        <li>
+            <span class="flex items-center justify-center px-3 h-9 leading-tight text-red-600 bg-red-50 border border-gray-300">{{ page_obj.number }}</span>
+        </li>
+        {% if page_obj.has_next %}
+        <li>
+            <a href="?page={{ page_obj.next_page_number }}&q={{ request.GET.q }}&start_date={{ request.GET.start_date }}&end_date={{ request.GET.end_date }}&butchery_id={{ request.GET.butchery_id }}"
+               class="flex items-center justify-center px-3 h-9 leading-tight text-gray-500 bg-white border border-gray-300 rounded-r-lg hover:bg-gray-100 hover:text-gray-700">Next</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}

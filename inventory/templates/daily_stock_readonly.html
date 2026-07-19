@@ -1,0 +1,111 @@
+{% extends 'base.html' %}
+{% block title %}{{ branch.name }} Daily Entry - {{ date }}{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center justify-between mb-6 gap-3">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">{{ branch.name }} — Daily Entry</h1>
+        <p class="text-gray-500">{{ date }} (read-only view)</p>
+    </div>
+    <div class="flex gap-2">
+        <form method="get" class="flex items-end gap-2">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Date</label>
+                <input type="date" name="date" value="{{ date }}" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5">
+            </div>
+            <input type="hidden" name="butchery_id" value="{{ branch.id }}">
+            <button class="bg-gray-800 hover:bg-gray-900 text-white text-sm rounded-lg px-4 py-2.5">View</button>
+        </form>
+        <a href="{% url 'home' %}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5 flex items-center">Back to Dashboard</a>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Stock Entries</h2>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-600">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th class="px-3 py-3">Product</th>
+                    <th class="px-3 py-3">Opening</th>
+                    <th class="px-3 py-3">Received</th>
+                    <th class="px-3 py-3">Wastage</th>
+                    <th class="px-3 py-3">Remaining</th>
+                    <th class="px-3 py-3">Sold</th>
+                    <th class="px-3 py-3">Revenue</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr class="border-b">
+                    <td class="px-3 py-2 font-medium text-gray-900">
+                        {{ row.product.name }}
+                        <span class="text-xs text-gray-400">({{ row.product.get_unit_display }})</span>
+                    </td>
+                    <td class="px-3 py-2">{{ row.opening }}</td>
+                    <td class="px-3 py-2">{{ row.received }}</td>
+                    <td class="px-3 py-2 text-red-600">{{ row.wastage }}</td>
+                    <td class="px-3 py-2">{{ row.closing }}</td>
+                    <td class="px-3 py-2 font-medium">{{ row.sold }}</td>
+                    <td class="px-3 py-2 font-medium text-emerald-600">{{ row.revenue }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="bg-gray-50 font-semibold text-gray-900">
+                    <td class="px-3 py-3" colspan="6">Total Revenue</td>
+                    <td class="px-3 py-3 text-emerald-600">{{ total_revenue }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Expenses</h2>
+    {% if expenses %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-600">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th class="px-3 py-3">Description</th>
+                    <th class="px-3 py-3">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for exp in expenses %}
+                <tr class="border-b">
+                    <td class="px-3 py-2">{{ exp.description }}</td>
+                    <td class="px-3 py-2 text-red-600">{{ exp.amount }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="bg-gray-50 font-semibold text-gray-900">
+                    <td class="px-3 py-3">Total Expenses</td>
+                    <td class="px-3 py-3 text-red-600">{{ total_expenses }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400">No expenses recorded for this day.</p>
+    {% endif %}
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">M-Pesa Collections</h2>
+        <p class="text-2xl font-bold text-purple-600">{{ mpesa_amount }}</p>
+        <p class="text-sm text-gray-500 mt-2">Cash at hand: {{ total_revenue|floatformat:2 }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Notes from Staff</h2>
+        {% if notes %}
+        <p class="text-gray-700">{{ notes }}</p>
+        {% else %}
+        <p class="text-gray-400">No notes from staff for this day.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

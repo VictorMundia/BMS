@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+{% block title %}Stock Movement - BMS{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <h1 class="text-xl font-bold text-gray-900 mb-6">Record Stock Movement</h1>
+
+        {% if form.non_field_errors %}
+            <div class="mb-4 p-3 rounded-lg bg-red-100 text-red-800 text-sm">
+                {{ form.non_field_errors }}
+            </div>
+        {% endif %}
+
+        <form method="post" class="space-y-5">
+            {% csrf_token %}
+
+            <div>
+                <label for="{{ form.product.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Product</label>
+                <select name="{{ form.product.html_name }}" id="{{ form.product.id_for_label }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+                    {% for value, label in form.product.field.choices %}
+                        <option value="{{ value }}" {% if form.product.value|stringformat:'s' == value|stringformat:'s' %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                {% if form.product.errors %}<p class="text-red-600 text-xs mt-1">{{ form.product.errors|striptags }}</p>{% endif %}
+            </div>
+
+            <div>
+                <label for="{{ form.quantity.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Quantity</label>
+                <input type="number" step="0.01" name="{{ form.quantity.html_name }}" id="{{ form.quantity.id_for_label }}"
+                    value="{{ form.quantity.value|default_if_none:'' }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+                {% if form.quantity.errors %}<p class="text-red-600 text-xs mt-1">{{ form.quantity.errors|striptags }}</p>{% endif %}
+            </div>
+
+            <div>
+                <label for="{{ form.movement_type.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Movement Type</label>
+                <select name="{{ form.movement_type.html_name }}" id="{{ form.movement_type.id_for_label }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+                    {% for value, label in form.movement_type.field.choices %}
+                        <option value="{{ value }}" {% if form.movement_type.value|stringformat:'s' == value|stringformat:'s' %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                {% if form.movement_type.errors %}<p class="text-red-600 text-xs mt-1">{{ form.movement_type.errors|striptags }}</p>{% endif %}
+            </div>
+
+            <div>
+                <label for="{{ form.unit_price.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Unit Price</label>
+                <input type="number" step="0.01" name="{{ form.unit_price.html_name }}" id="{{ form.unit_price.id_for_label }}"
+                    value="{{ form.unit_price.value|default_if_none:'' }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+                {% if form.unit_price.errors %}<p class="text-red-600 text-xs mt-1">{{ form.unit_price.errors|striptags }}</p>{% endif %}
+            </div>
+
+            <div>
+                <label for="{{ form.notes.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Notes</label>
+                <textarea name="{{ form.notes.html_name }}" id="{{ form.notes.id_for_label }}" rows="3"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">{{ form.notes.value|default_if_none:'' }}</textarea>
+                {% if form.notes.errors %}<p class="text-red-600 text-xs mt-1">{{ form.notes.errors|striptags }}</p>{% endif %}
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button type="submit" class="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-5 py-2.5">Save Movement</button>
+                <a href="{% url 'home' %}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

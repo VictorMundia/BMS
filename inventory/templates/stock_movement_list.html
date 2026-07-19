@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}Stock Movements - BMS{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Stock Movements</h1>
+    <a href="{% url 'stock_movement' %}" class="text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-5 py-2.5">New Movement</a>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+    {% include 'partials/_search_filter.html' %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-600">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3">Product</th>
+                    <th class="px-4 py-3">Type</th>
+                    <th class="px-4 py-3">Quantity</th>
+                    <th class="px-4 py-3">Unit Price</th>
+                    <th class="px-4 py-3">Recorded By</th>
+                    <th class="px-4 py-3">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in page_obj %}
+                <tr class="border-b">
+                    <td class="px-4 py-3 font-medium text-gray-900">{{ m.product.name }}</td>
+                    <td class="px-4 py-3">{{ m.get_movement_type_display }}</td>
+                    <td class="px-4 py-3">{{ m.quantity }}</td>
+                    <td class="px-4 py-3">{{ m.unit_price }}</td>
+                    <td class="px-4 py-3">{{ m.recorded_by.username|default:"-" }}</td>
+                    <td class="px-4 py-3">{{ m.timestamp|date:"M d, Y H:i" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="px-4 py-3 text-center text-gray-400">No stock movements found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% include 'partials/_pagination.html' %}
+</div>
+{% endblock %}

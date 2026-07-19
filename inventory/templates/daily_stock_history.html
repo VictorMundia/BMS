@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block title %}Stock History - BMS{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Daily Stock History</h1>
+    <a href="{% url 'daily_stock_entry' %}" class="text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-5 py-2.5">New Entry</a>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+    {% include 'partials/_search_filter.html' %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-600">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3">Date</th>
+                    <th class="px-4 py-3">Branch</th>
+                    <th class="px-4 py-3">Product</th>
+                    <th class="px-4 py-3">Opening</th>
+                    <th class="px-4 py-3">Received</th>
+                    <th class="px-4 py-3">Wastage</th>
+                    <th class="px-4 py-3">Closing</th>
+                    <th class="px-4 py-3">Sold</th>
+                    <th class="px-4 py-3">Revenue</th>
+                    <th class="px-4 py-3">Profit</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ds in page_obj %}
+                <tr class="border-b">
+                    <td class="px-4 py-3">{{ ds.date }}</td>
+                    <td class="px-4 py-3">{{ ds.product.butchery.name }}</td>
+                    <td class="px-4 py-3 font-medium text-gray-900">{{ ds.product.name }}</td>
+                    <td class="px-4 py-3">{{ ds.opening_stock }}</td>
+                    <td class="px-4 py-3">{{ ds.received }}</td>
+                    <td class="px-4 py-3">{{ ds.wastage }}</td>
+                    <td class="px-4 py-3">{{ ds.closing_stock }}</td>
+                    <td class="px-4 py-3 font-medium">{{ ds.sold }}</td>
+                    <td class="px-4 py-3 text-emerald-600">{{ ds.revenue|floatformat:2 }}</td>
+                    <td class="px-4 py-3 text-blue-600">{{ ds.gross_profit|floatformat:2 }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="10" class="px-4 py-3 text-center text-gray-400">No entries found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% include 'partials/_pagination.html' %}
+</div>
+{% endblock %}

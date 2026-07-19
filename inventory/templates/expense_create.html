@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}Record Expense - BMS{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <h1 class="text-xl font-bold text-gray-900 mb-6">Record Expense</h1>
+
+        {% if form.non_field_errors %}
+            <div class="mb-4 p-3 rounded-lg bg-red-100 text-red-800 text-sm">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <form method="post" enctype="multipart/form-data" class="space-y-5">
+            {% csrf_token %}
+            <div>
+                <label for="{{ form.butchery.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Butchery</label>
+                <select name="{{ form.butchery.html_name }}" id="{{ form.butchery.id_for_label }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+                    {% for value, label in form.butchery.field.choices %}
+                        <option value="{{ value }}" {% if form.butchery.value|stringformat:'s' == value|stringformat:'s' %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="{{ form.category.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Category</label>
+                <select name="{{ form.category.html_name }}" id="{{ form.category.id_for_label }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+                    {% for value, label in form.category.field.choices %}
+                        <option value="{{ value }}" {% if form.category.value|stringformat:'s' == value|stringformat:'s' %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="{{ form.amount.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Amount</label>
+                <input type="number" step="0.01" name="{{ form.amount.html_name }}" id="{{ form.amount.id_for_label }}"
+                    value="{{ form.amount.value|default_if_none:'' }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+            </div>
+            <div>
+                <label for="{{ form.description.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Description</label>
+                <textarea name="{{ form.description.html_name }}" id="{{ form.description.id_for_label }}" rows="3"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">{{ form.description.value|default_if_none:'' }}</textarea>
+            </div>
+            <div>
+                <label for="{{ form.date.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Date</label>
+                <input type="date" name="{{ form.date.html_name }}" id="{{ form.date.id_for_label }}"
+                    value="{{ form.date.value|date:'Y-m-d' }}"
+                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+            </div>
+            <div>
+                <label for="{{ form.receipt_image.id_for_label }}" class="block mb-2 text-sm font-medium text-gray-900">Receipt Image</label>
+                <input type="file" name="{{ form.receipt_image.html_name }}" id="{{ form.receipt_image.id_for_label }}"
+                    class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 p-2.5">
+            </div>
+            <div class="flex items-center gap-3">
+                <button type="submit" class="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-5 py-2.5">Save Expense</button>
+                <a href="{% url 'expense_list' %}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% comment %}Reusable search + filter bar. Expects: butcheries, request.{% endcomment %}
+<form method="get" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+    <div class="lg:col-span-2">
+        <input type="text" name="q" value="{{ request.GET.q }}" placeholder="Search..."
+            class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+    </div>
+    <div>
+        <input type="date" name="start_date" value="{{ request.GET.start_date }}"
+            class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+    </div>
+    <div>
+        <input type="date" name="end_date" value="{{ request.GET.end_date }}"
+            class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+    </div>
+    <div class="flex gap-2">
+        <select name="butchery_id"
+            class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-2.5">
+            <option value="">All Butcheries</option>
+            {% for b in butcheries %}
+                <option value="{{ b.id }}" {% if request.GET.butchery_id == b.id|stringformat:'s' %}selected{% endif %}>{{ b.name }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-4 py-2.5">Filter</button>
+    </div>
+</form>
