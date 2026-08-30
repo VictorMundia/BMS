@@ -102,6 +102,21 @@ class DailyStock(models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name='daily_stocks'
     )
     notes = models.TextField(blank=True)
+    # Transfer fields
+    transfer_to = models.ForeignKey(
+        Butchery, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='daily_transfers_out',
+        help_text="Branch to which stock was transferred"
+    )
+    transfer_from = models.ForeignKey(
+        Butchery, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='daily_transfers_in',
+        help_text="Branch from which stock was received via transfer"
+    )
+    transfer_quantity = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Quantity transferred"
+    )
 
     class Meta:
         unique_together = ('product', 'date')

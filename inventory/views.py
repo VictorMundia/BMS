@@ -208,6 +208,15 @@ def daily_stock_entry(request):
     """Butcher records received + remaining stock and the day's expenses."""
     branches = Butchery.objects.all()
     locked_branch = None
+    
+    # Lock branch for non-superusers based on their staff assignment
+    if not request.user.is_superuser:
+        try:
+            staff = request.user.staff_profile
+            locked_branch = staff.butchery
+        except Staff.DoesNotExist:
+            # If no staff assignment, allow all branches (fallback)
+            pass
 
     if request.method == 'POST':
         butchery = get_object_or_404(Butchery, pk=request.POST.get('butchery'))
@@ -217,7 +226,51 @@ def daily_stock_entry(request):
                 received = _to_decimal(request.POST.get(f'received_{product.id}'))
                 closing = _to_decimal(request.POST.get(f'closing_{product.id}'))
                 wastage = _to_decimal(request.POST.get(f'wastage_{product.id}'))
+                transfer_to_id = request.POST.get(f'transfer_to_{product.id}')
+                transfer_quantity = _to_decimal(request.POST.get(f'transfer_quantity_{product.id}'))
                 opening = _opening_for(product, post_date)
+                
+                # Handle transfer logic
+                transfer_to = None
+                if transfer_to_id and transfer_quantity > 0:
+                    transfer_to = get_object_or_404(Butchery, pk=transfer_to_id)
+                    # Validate that source has enough stock
+                    if opening + received < transfer_quantity:
+                        messages.error(request, f'Not enough stock for {product.name} to transfer {transfer_quantity} to {transfer_to.name}')
+                        return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
+                    
+                    # Find the same product in the destination branch
+                    dest_product = MeatProduct.objects.filter(
+                        name=product.name,
+                        butchery=transfer_to,
+                        category=product.category
+                    ).first()
+                    
+                    if dest_product:
+                        # Create incoming transfer for destination branch
+                        dest_opening = _opening_for(dest_product, post_date)
+                        dest_daily = DailyStock.objects.filter(product=dest_product, date=post_date).first()
+                        dest_received = dest_daily.received if dest_daily else Decimal('0')
+                        dest_closing = dest_daily.closing_stock if dest_daily else dest_opening
+                        dest_wastage = dest_daily.wastage if dest_daily else Decimal('0')
+                        
+                        DailyStock.objects.update_or_create(
+                            product=dest_product, date=post_date,
+                            defaults={
+                                'opening_stock': dest_opening,
+                                'received': dest_received + transfer_quantity,
+                                'closing_stock': dest_closing + transfer_quantity,
+                                'wastage': dest_wastage,
+                                'transfer_from': butchery,
+                                'transfer_quantity': transfer_quantity,
+                                'recorded_by': request.user,
+                            },
+                        )
+                        # Update destination product's current stock
+                        dest_product.current_stock = dest_closing + transfer_quantity
+                        dest_product.save()
+                        messages.success(request, f'Transferred {transfer_quantity} {product.name} to {transfer_to.name}')
+                
                 DailyStock.objects.update_or_create(
                     product=product, date=post_date,
                     defaults={
@@ -225,6 +278,8 @@ def daily_stock_entry(request):
                         'received': received,
                         'closing_stock': closing,
                         'wastage': wastage,
+                        'transfer_to': transfer_to,
+                        'transfer_quantity': transfer_quantity if transfer_to else Decimal('0'),
                         'recorded_by': request.user,
                     },
                 )
@@ -268,6 +323,9 @@ def daily_stock_entry(request):
                 'received': existing.received if existing else '',
                 'closing': existing.closing_stock if existing else '',
                 'wastage': existing.wastage if existing else '',
+                'transfer_quantity': existing.transfer_quantity if existing else '',
+                'transfer_from': existing.transfer_from if existing else None,
+                'transfer_to': existing.transfer_to if existing else None,
             })
     summary = DailyBranchSummary.objects.filter(butchery=selected, date=date).first()
     context = {
