@@ -107,6 +107,26 @@ class DailyStock(models.Model):
         unique_together = ('product', 'date')
         ordering = ['-date']
 
+    @property
+    def sold(self):
+        """Sold = opening + received - wastage - closing"""
+        return self.opening_stock + self.received - self.wastage - self.closing_stock
+
+    @property
+    def revenue(self):
+        """Revenue = sold * selling_price"""
+        return self.sold * self.product.selling_price
+
+    @property
+    def cost_of_sales(self):
+        """COGS = sold * buying_price"""
+        return self.sold * self.product.buying_price
+
+    @property
+    def closing_value(self):
+        """Closing value = closing_stock * buying_price"""
+        return self.closing_stock * self.product.buying_price
+
 
 # ---------------------------------------------------------------------------
 # Daily transfers (allows multiple transfers per product per day)
