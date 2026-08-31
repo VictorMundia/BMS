@@ -337,19 +337,23 @@ def daily_stock_entry(request):
     if selected:
         for product in selected.products.select_related('category'):
             existing = DailyStock.objects.filter(product=product, date=date).first()
-            rows.append({
+            row = {
                 'product': product,
                 'opening': _opening_for(product, date),
                 'received': existing.received if existing else '',
                 'closing': existing.closing_stock if existing else '',
                 'wastage': existing.wastage if existing else '',
-            })
+            }
             if existing:
-                rows[-1]['transfers_out'] = existing.transfers_out.all()
-                rows[-1]['transfers_in'] = existing.transfers_in.all()
+                row['transfers_out'] = existing.transfers_out.all()
+                row['transfers_in'] = selected.daily_transfers_in.filter(
+                    source_daily_stock__product=product,
+                    source_daily_stock__date=date
+                ).select_related('source_daily_stock__product__butchery')
             else:
-                rows[-1]['transfers_out'] = []
-                rows[-1]['transfers_in'] = []
+                row['transfers_out'] = []
+                row['transfers_in'] = []
+            rows.append(row)
     summary = DailyBranchSummary.objects.filter(butchery=selected, date=date).first()
     context = {
         'branches': branches,
@@ -384,7 +388,10 @@ def daily_stock_readonly(request):
         }
         if existing:
             row['transfers_out'] = existing.transfers_out.all()
-            row['transfers_in'] = existing.transfers_in.all()
+            row['transfers_in'] = branch.daily_transfers_in.filter(
+                source_daily_stock__product=product,
+                source_daily_stock__date=date
+            ).select_related('source_daily_stock__product__butchery')
         else:
             row['transfers_out'] = []
             row['transfers_in'] = []

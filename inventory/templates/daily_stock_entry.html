@@ -102,10 +102,10 @@
                         <td class="px-3 py-2 sold-cell font-medium">0</td>
                         <td class="px-3 py-2 revenue-cell font-medium">0.00</td>
                         <td class="px-3 py-2 text-xs text-gray-500">
-                            {% for transfer in row.transfers_out.all %}
+                            {% for transfer in row.transfers_out %}
                                 To: {{ transfer.to_butchery.name }} ({{ transfer.quantity }})<br>
                             {% endfor %}
-                            {% for transfer in row.transfers_in.all %}
+                            {% for transfer in row.transfers_in %}
                                 From: {{ transfer.source_daily_stock.product.butchery.name }} ({{ transfer.quantity }})<br>
                             {% endfor %}
                         </td>
