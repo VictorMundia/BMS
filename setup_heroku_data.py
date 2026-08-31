@@ -50,7 +50,7 @@ for cat_data in categories_data:
 products_data = [
     {'name': 'Beef', 'category': 'Beef', 'selling_price': 860, 'unit': 'KG'},
     {'name': 'Goat', 'category': 'Goat Meat', 'selling_price': 1000, 'unit': 'KG'},
-    {'name': 'Liver', 'category': 'Offal', 'selling_price': 900, 'unit': 'KG'},
+    {'name': 'Liver', 'category': 'Offal', 'selling_price': 800, 'unit': 'KG'},
     {'name': 'Chicken', 'category': 'Chicken', 'selling_price': 620, 'unit': 'PC'},
     {'name': 'Kienyeji Chicken', 'category': 'Chicken', 'selling_price': 1000, 'unit': 'PC'},
     {'name': 'Minced Meat', 'category': 'Beef', 'selling_price': 960, 'unit': 'KG'},

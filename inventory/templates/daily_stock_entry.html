@@ -50,8 +50,8 @@
                         <th class="px-3 py-3">Product</th>
                         <th class="px-3 py-3">Opening</th>
                         <th class="px-3 py-3">Received</th>
-                        <th class="px-3 py-3">Transfer To</th>
-                        <th class="px-3 py-3">Transfer Qty</th>
+                        <th class="px-3 py-3">Transfers</th>
+                        <th class="px-3 py-3"></th>
                         <th class="px-3 py-3">Wastage</th>
                         <th class="px-3 py-3">Remaining</th>
                         <th class="px-3 py-3">Sold</th>
@@ -74,19 +74,23 @@
                                    value="{{ row.received }}" class="received w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
                         </td>
                         <td class="px-3 py-2">
-                            <select name="transfer_to_{{ row.product.id }}" class="transfer-to w-28 bg-gray-50 border border-gray-300 rounded-lg p-2">
-                                <option value="">None</option>
-                                {% for b in branches %}
-                                    {% if b.id != selected.id %}
-                                    <option value="{{ b.id }}">{{ b.name }}</option>
-                                    {% endif %}
-                                {% endfor %}
-                            </select>
+                            <div id="transfer-container-{{ row.product.id }}">
+                                <div class="transfer-row flex gap-2 mb-1">
+                                    <select name="transfer_to_{{ row.product.id }}" class="transfer-to w-28 bg-gray-50 border border-gray-300 rounded-lg p-2">
+                                        <option value="">None</option>
+                                        {% for b in branches %}
+                                            {% if b.id != selected.id %}
+                                            <option value="{{ b.id }}">{{ b.name }}</option>
+                                            {% endif %}
+                                        {% endfor %}
+                                    </select>
+                                    <input type="number" step="0.01" min="0" name="transfer_quantity_{{ row.product.id }}"
+                                           value="" class="transfer-quantity w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
+                                </div>
+                            </div>
+                            <button type="button" onclick="addTransferRow({{ row.product.id }})" class="text-xs text-blue-600 hover:underline">+ Add Transfer</button>
                         </td>
-                        <td class="px-3 py-2">
-                            <input type="number" step="0.01" min="0" name="transfer_quantity_{{ row.product.id }}"
-                                   value="{{ row.transfer_quantity }}" class="transfer-quantity w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
-                        </td>
+                        <td class="px-3 py-2"></td>
                         <td class="px-3 py-2">
                             <input type="number" step="0.01" min="0" name="wastage_{{ row.product.id }}"
                                    value="{{ row.wastage }}" class="wastage w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
@@ -98,11 +102,12 @@
                         <td class="px-3 py-2 sold-cell font-medium">0</td>
                         <td class="px-3 py-2 revenue-cell font-medium">0.00</td>
                         <td class="px-3 py-2 text-xs text-gray-500">
-                            {% if row.transfer_from %}
-                                From: {{ row.transfer_from.name }} ({{ row.transfer_quantity }})
-                            {% elif row.transfer_to %}
-                                To: {{ row.transfer_to.name }} ({{ row.transfer_quantity }})
-                            {% endif %}
+                            {% for transfer in row.transfers_out.all %}
+                                To: {{ transfer.to_butchery.name }} ({{ transfer.quantity }})<br>
+                            {% endfor %}
+                            {% for transfer in row.transfers_in.all %}
+                                From: {{ transfer.source_daily_stock.product.butchery.name }} ({{ transfer.quantity }})<br>
+                            {% endfor %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -171,16 +176,38 @@
 
 <script>
 (function(){
+    function addTransferRow(productId) {
+        const container = document.getElementById('transfer-container-' + productId);
+        const newRow = document.createElement('div');
+        newRow.className = 'transfer-row flex gap-2 mb-1';
+        newRow.innerHTML = `
+            <select name="transfer_to_${productId}" class="transfer-to w-28 bg-gray-50 border border-gray-300 rounded-lg p-2">
+                <option value="">None</option>
+                {% for b in branches %}
+                    {% if b.id != selected.id %}
+                    <option value="{{ b.id }}">{{ b.name }}</option>
+                    {% endif %}
+                {% endfor %}
+            </select>
+            <input type="number" step="0.01" min="0" name="transfer_quantity_${productId}"
+                   value="" class="transfer-quantity w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
+        `;
+        container.appendChild(newRow);
+    }
+
     function recalc(){
         let totalRev = 0;
         document.querySelectorAll('.stock-row').forEach(function(row){
             const opening = parseFloat(row.dataset.opening) || 0;
             const selling = parseFloat(row.dataset.selling) || 0;
             const received = parseFloat(row.querySelector('.received').value) || 0;
-            const transferQty = parseFloat(row.querySelector('.transfer-quantity').value) || 0;
+            let totalTransferQty = 0;
+            row.querySelectorAll('.transfer-quantity').forEach(function(input){
+                totalTransferQty += parseFloat(input.value) || 0;
+            });
             const wastage = parseFloat(row.querySelector('.wastage').value) || 0;
             const closing = parseFloat(row.querySelector('.closing').value) || 0;
-            let sold = opening + received - transferQty - wastage - closing;
+            let sold = opening + received - totalTransferQty - wastage - closing;
             if(sold < 0) sold = 0;
             const rev = sold * selling;
             row.querySelector('.sold-cell').textContent = sold.toFixed(2);

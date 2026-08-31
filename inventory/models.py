@@ -102,49 +102,36 @@ class DailyStock(models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name='daily_stocks'
     )
     notes = models.TextField(blank=True)
-    # Transfer fields
-    transfer_to = models.ForeignKey(
-        Butchery, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='daily_transfers_out',
-        help_text="Branch to which stock was transferred"
-    )
-    transfer_from = models.ForeignKey(
-        Butchery, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='daily_transfers_in',
-        help_text="Branch from which stock was received via transfer"
-    )
-    transfer_quantity = models.DecimalField(
-        max_digits=10, decimal_places=2, default=0,
-        help_text="Quantity transferred"
-    )
 
     class Meta:
         unique_together = ('product', 'date')
         ordering = ['-date']
 
-    @property
-    def sold(self):
-        qty = self.opening_stock + self.received - self.wastage - self.closing_stock
-        return qty if qty > 0 else Decimal('0')
 
-    @property
-    def revenue(self):
-        return self.sold * self.product.selling_price
+# ---------------------------------------------------------------------------
+# Daily transfers (allows multiple transfers per product per day)
+# ---------------------------------------------------------------------------
+class DailyTransfer(models.Model):
+    """Represents a transfer of stock from one branch to another on a specific day."""
+    source_daily_stock = models.ForeignKey(
+        DailyStock, on_delete=models.CASCADE, related_name='transfers_out',
+        help_text="The daily stock entry from which stock is transferred"
+    )
+    to_butchery = models.ForeignKey(
+        Butchery, on_delete=models.CASCADE, related_name='daily_transfers_in',
+        help_text="Branch receiving the transfer"
+    )
+    quantity = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        help_text="Quantity transferred"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
 
-    @property
-    def cost_of_sales(self):
-        return self.sold * self.product.buying_price
-
-    @property
-    def gross_profit(self):
-        return self.revenue - self.cost_of_sales
-
-    @property
-    def closing_value(self):
-        return self.closing_stock * self.product.buying_price
+    class Meta:
+        ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.product.name} - {self.date}"
+        return f"{self.quantity} {self.source_daily_stock.product.unit} to {self.to_butchery.name}"
 
 
 class DailyBranchSummary(models.Model):
