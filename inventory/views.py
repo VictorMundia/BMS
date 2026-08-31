@@ -373,7 +373,7 @@ def daily_stock_readonly(request):
     rows = []
     for product in branch.products.select_related('category'):
         existing = DailyStock.objects.filter(product=product, date=date).first()
-        rows.append({
+        row = {
             'product': product,
             'opening': _opening_for(product, date),
             'received': existing.received if existing else Decimal('0'),
@@ -381,7 +381,14 @@ def daily_stock_readonly(request):
             'wastage': existing.wastage if existing else Decimal('0'),
             'sold': existing.sold if existing else Decimal('0'),
             'revenue': existing.revenue if existing else Decimal('0'),
-        })
+        }
+        if existing:
+            row['transfers_out'] = existing.transfers_out.all()
+            row['transfers_in'] = existing.transfers_in.all()
+        else:
+            row['transfers_out'] = []
+            row['transfers_in'] = []
+        rows.append(row)
     
     expenses = Expense.objects.filter(butchery=branch, date=date)
     summary = DailyBranchSummary.objects.filter(butchery=branch, date=date).first()
