@@ -223,6 +223,12 @@ def daily_stock_entry(request):
     if request.method == 'POST':
         butchery = get_object_or_404(Butchery, pk=request.POST.get('butchery'))
         post_date = _parse_date(request.POST.get('date')) or localdate()
+        
+        # Date validation: non-superusers can only edit today's data
+        if not request.user.is_superuser and post_date != localdate():
+            messages.error(request, 'You can only edit data for today. Past days are read-only. Contact the admin to make changes to past dates.')
+            return redirect(f"{reverse('daily_stock_readonly')}?butchery_id={butchery.id}&date={post_date}")
+        
         with transaction.atomic():
             for product in butchery.products.all():
                 received = _to_decimal(request.POST.get(f'received_{product.id}'))
@@ -328,6 +334,18 @@ def daily_stock_entry(request):
         return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
 
     date = _parse_date(request.GET.get('date')) or localdate()
+    
+    # Date validation: non-superusers viewing past days should be redirected to read-only view
+    if not request.user.is_superuser and date != localdate():
+        selected = (
+            locked_branch
+            or branches.filter(pk=request.GET.get('butchery')).first()
+            or branches.first()
+        )
+        if selected:
+            messages.warning(request, 'You can only edit data for today. Past days are read-only.')
+            return redirect(f"{reverse('daily_stock_readonly')}?butchery_id={selected.id}&date={date}")
+    
     selected = (
         locked_branch
         or branches.filter(pk=request.GET.get('butchery')).first()
@@ -539,6 +557,11 @@ def expense_create(request):
     if request.method == 'POST':
         form = ExpenseForm(request.POST, request.FILES)
         if form.is_valid():
+            expense_date = form.cleaned_data.get('date')
+            # Date validation: non-superusers can only create expenses for today
+            if not request.user.is_superuser and expense_date and expense_date != localdate():
+                messages.error(request, 'You can only record expenses for today. Past dates are read-only. Contact the admin to make changes to past dates.')
+                return render(request, 'expense_create.html', {'form': form})
             with transaction.atomic():
                 expense = form.save(commit=False)
                 expense.recorded_by = request.user
