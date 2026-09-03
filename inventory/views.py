@@ -334,18 +334,6 @@ def daily_stock_entry(request):
         return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
 
     date = _parse_date(request.GET.get('date')) or localdate()
-    
-    # Date validation: non-superusers viewing past days should be redirected to read-only view
-    if not request.user.is_superuser and date != localdate():
-        selected = (
-            locked_branch
-            or branches.filter(pk=request.GET.get('butchery')).first()
-            or branches.first()
-        )
-        if selected:
-            messages.warning(request, 'You can only edit data for today. Past days are read-only.')
-            return redirect(f"{reverse('daily_stock_readonly')}?butchery_id={selected.id}&date={date}")
-    
     selected = (
         locked_branch
         or branches.filter(pk=request.GET.get('butchery')).first()
@@ -379,6 +367,7 @@ def daily_stock_entry(request):
         'selected': selected,
         'rows': rows,
         'date': date.isoformat(),
+        'today': localdate().isoformat(),
         'mpesa_amount': summary.mpesa_amount if summary else '',
         'notes': summary.notes if summary else '',
     }
