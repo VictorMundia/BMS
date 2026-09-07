@@ -117,9 +117,9 @@ LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/inventory/'
 
 # Session configuration
-SESSION_COOKIE_AGE = 3600  # 1 hour
-SESSION_SAVE_EVERY_REQUEST = True
-SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+SESSION_COOKIE_AGE = 86400  # 24 hours
+SESSION_SAVE_EVERY_REQUEST = False
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
 # Email configuration (credentials sourced via python-decouple)
 EMAIL_BACKEND = config(
