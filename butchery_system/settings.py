@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'inventory.apps.InventoryConfig',
+    'jazzmin',
 ]
 
 MIDDLEWARE = [
@@ -132,3 +133,43 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='bms@example.com')
 LOW_STOCK_ALERT_EMAIL = config('LOW_STOCK_ALERT_EMAIL', default='admin@example.com')
+
+# Jazzmin Admin Theme Configuration
+JAZZMIN_SETTINGS = {
+    'title': 'BMS Admin',
+    'site_title': 'BMS Admin',
+    'site_header': 'BMS Administration',
+    'index_title': 'Welcome to BMS Administration',
+    'language_selector': True,
+    'show_apps': ['inventory', 'auth'],
+    'hide_apps': [],
+    'icons': {
+        'inventory': 'fas fa-box',
+        'auth': 'fas fa-users',
+        'inventory.MeatCategory': 'fas fa-tags',
+        'inventory.Butchery': 'fas fa-store',
+        'inventory.MeatProduct': 'fas fa-drumstick-bite',
+        'inventory.DailyStock': 'fas fa-calendar-day',
+        'inventory.DailyBranchSummary': 'fas fa-chart-line',
+        'inventory.ExpenseCategory': 'fas fa-receipt',
+        'inventory.Expense': 'fas fa-money-bill',
+        'inventory.Staff': 'fas fa-user-tie',
+        'inventory.Shift': 'fas fa-clock',
+        'inventory.StockTransfer': 'fas fa-truck',
+        'inventory.AuditLog': 'fas fa-history',
+        'inventory.DatePermission': 'fas fa-key',
+        'auth.User': 'fas fa-user',
+        'auth.Group': 'fas fa-users-cog',
+    },
+    'navigation': [
+        {'title': 'Inventory', 'apps': ['inventory'], 'icon': 'fas fa-box'},
+        {'title': 'Users', 'apps': ['auth'], 'icon': 'fas fa-users'},
+    ],
+    'search_url': 'admin:search',
+    'user_avatar': 'img/user-icon.png',
+    'top_menu_links': [
+        {'title': 'Dashboard', 'url': '/', 'icon': 'fas fa-home'},
+        {'title': 'Support', 'url': 'https://github.com/farridav/django-jazzmin', 'icon': 'fas fa-life-ring'},
+    ],
+    'related_modal_active': True,
+}
