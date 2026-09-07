@@ -281,6 +281,27 @@ class DatePermission(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Buying prices for accurate P&L calculations
+# ---------------------------------------------------------------------------
+class BuyingPrice(models.Model):
+    """Tracks buying prices from slaughter house by product and date."""
+    product = models.ForeignKey(MeatProduct, on_delete=models.CASCADE, related_name='buying_prices')
+    date = models.DateField(help_text="Date when this price was paid")
+    buying_price_per_kg = models.DecimalField(max_digits=10, decimal_places=2, help_text="Price per kg from slaughter house")
+    quantity_received = models.DecimalField(max_digits=10, decimal_places=2, help_text="Quantity received (in kg)")
+    recorded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='recorded_buying_prices')
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, help_text="Optional notes about this purchase")
+
+    class Meta:
+        unique_together = ('product', 'date')
+        ordering = ['-date', '-recorded_at']
+
+    def __str__(self):
+        return f"{self.product.name} - {self.date} - {self.buying_price_per_kg}/kg"
+
+
+# ---------------------------------------------------------------------------
 # Stock transfers
 # ---------------------------------------------------------------------------
 class StockTransfer(models.Model):

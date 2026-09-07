@@ -26,4 +26,7 @@ urlpatterns = [
     # Stock transfers
     path('transfers/create/', views.transfer_create, name='transfer_create'),
     path('transfers/<int:pk>/approve/', views.transfer_approve, name='transfer_approve'),
+    # Buying prices (owner only)
+    path('buying-prices/', views.buying_prices, name='buying_prices'),
+    path('buying-prices/save/', views.save_buying_prices, name='save_buying_prices'),
 ]

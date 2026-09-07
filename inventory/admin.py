@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from .models import (
     MeatCategory, Butchery, MeatProduct, StockMovement,
     DailyStock, DailyBranchSummary, ExpenseCategory, Expense,
-    Staff, Shift, StockTransfer, AuditLog, DatePermission,
+    Staff, Shift, StockTransfer, AuditLog, DatePermission, BuyingPrice,
 )
 
 
@@ -188,4 +188,36 @@ class DatePermissionAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         if not change:  # Only set granted_by when creating new permission
             obj.granted_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(BuyingPrice)
+class BuyingPriceAdmin(admin.ModelAdmin):
+    """Admin interface for managing buying prices."""
+    list_display = ('product', 'date', 'buying_price_per_kg', 'quantity_received', 'recorded_by', 'recorded_at')
+    list_filter = ('date', 'product__category', 'product')
+    search_fields = ('product__name', 'notes')
+    readonly_fields = ('recorded_at',)
+    list_per_page = 25
+    date_hierarchy = 'date'
+    
+    fieldsets = (
+        ('Purchase Details', {
+            'fields': ('product', 'date', 'buying_price_per_kg', 'quantity_received'),
+            'description': 'Enter the buying price and quantity received from the slaughter house.'
+        }),
+        ('Additional Information', {
+            'fields': ('notes',),
+            'description': 'Optional notes about this purchase.'
+        }),
+        ('Audit Information', {
+            'fields': ('recorded_by', 'recorded_at'),
+            'classes': ('collapse',),
+            'description': 'Automatically tracked information.'
+        }),
+    )
+    
+    def save_model(self, request, obj, form, change):
+        if not change:  # Only set recorded_by when creating new buying price
+            obj.recorded_by = request.user
         super().save_model(request, obj, form, change)

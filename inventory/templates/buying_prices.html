@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+{% load custom_filters %}
+
+{% block title %}Buying Prices - BMS{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-bold text-gray-900">Record Buying Prices</h1>
+            <a href="{% url 'home' %}" class="text-gray-600 hover:text-gray-900">Back to Dashboard</a>
+        </div>
+
+        <div class="mb-6">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Select Date</label>
+            <input type="date" id="date-picker" value="{{ date|date:'Y-m-d' }}" 
+                   class="bg-gray-50 border border-gray-300 rounded-lg p-2.5 w-full md:w-64">
+        </div>
+
+        <form id="buying-prices-form" method="post" action="{% url 'save_buying_prices' %}">
+            {% csrf_token %}
+            <input type="hidden" name="date" id="date-input" value="{{ date|date:'Y-m-d' }}">
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left text-gray-600">
+                    <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                        <tr>
+                            <th class="px-3 py-3">Product</th>
+                            <th class="px-3 py-3">Category</th>
+                            <th class="px-3 py-3">Buying Price (KES/kg)</th>
+                            <th class="px-3 py-3">Quantity Received (kg)</th>
+                            <th class="px-3 py-3">Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for product in products %}
+                        {% with existing_price=existing_prices|get_item:product.id %}
+                        <tr class="border-b">
+                            <td class="px-3 py-3 font-medium">{{ product.name }}</td>
+                            <td class="px-3 py-3">{{ product.category.name }}</td>
+                            <td class="px-3 py-3">
+                                <input type="number" step="0.01" min="0" 
+                                       name="price_{{ product.id }}" 
+                                       value="{% if existing_price %}{{ existing_price.buying_price_per_kg }}{% endif %}"
+                                       class="w-32 bg-gray-50 border border-gray-300 rounded-lg p-2"
+                                       placeholder="0.00">
+                            </td>
+                            <td class="px-3 py-3">
+                                <input type="number" step="0.01" min="0" 
+                                       name="quantity_{{ product.id }}"
+                                       value="{% if existing_price %}{{ existing_price.quantity_received }}{% endif %}"
+                                       class="w-32 bg-gray-50 border border-gray-300 rounded-lg p-2"
+                                       placeholder="0.00">
+                            </td>
+                            <td class="px-3 py-3">
+                                <input type="text" 
+                                       name="notes_{{ product.id }}"
+                                       value="{% if existing_price %}{{ existing_price.notes }}{% endif %}"
+                                       class="w-48 bg-gray-50 border border-gray-300 rounded-lg p-2"
+                                       placeholder="Optional notes">
+                            </td>
+                        </tr>
+                        {% endwith %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-6 flex items-center gap-3">
+                <button type="submit" class="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-6 py-2.5">
+                    Save Buying Prices
+                </button>
+                <a href="{% url 'home' %}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5">
+                    Cancel
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.getElementById('date-picker').addEventListener('change', function() {
+    const date = this.value;
+    window.location.href = `{% url 'buying_prices' %}?date=${date}`;
+});
+
+document.getElementById('buying-prices-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    
+    fetch('{% url "save_buying_prices" %}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Buying prices saved successfully!');
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to save buying prices'));
+        }
+    })
+    .catch(error => {
+        alert('Error: Failed to save buying prices');
+        console.error('Error:', error);
+    });
+});
+</script>
+{% endblock %}

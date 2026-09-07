@@ -159,6 +159,7 @@ JAZZMIN_SETTINGS = {
         'inventory.StockTransfer': 'fas fa-truck',
         'inventory.AuditLog': 'fas fa-history',
         'inventory.DatePermission': 'fas fa-key',
+        'inventory.BuyingPrice': 'fas fa-shopping-cart',
         'auth.User': 'fas fa-user',
         'auth.Group': 'fas fa-users-cog',
     },

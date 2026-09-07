@@ -20,7 +20,7 @@ from .forms import (
 )
 from .models import (
     MeatProduct, StockMovement, DailyStock, DailyBranchSummary, Butchery,
-    Expense, ExpenseCategory, Staff, StockTransfer, AuditLog, DatePermission,
+    Expense, ExpenseCategory, Staff, StockTransfer, AuditLog, DatePermission, BuyingPrice,
 )
 from .utils import send_low_stock_alert, log_action
 
@@ -469,6 +469,95 @@ def daily_stock_history(request):
     })
 
 
+@login_required
+def buying_prices(request):
+    """Owner-only view to manage buying prices."""
+    if not request.user.is_superuser:
+        messages.error(request, 'Only the owner can access this section.')
+        return redirect('home')
+    
+    date = _parse_date(request.GET.get('date')) or localdate()
+    products = MeatProduct.objects.select_related('category').all()
+    
+    # Get existing buying prices for the selected date as a dictionary
+    existing_prices = {
+        bp.product_id: bp for bp in BuyingPrice.objects.filter(date=date).select_related('product')
+    }
+    
+    context = {
+        'date': date,
+        'products': products,
+        'existing_prices': existing_prices,
+    }
+    return render(request, 'buying_prices.html', context)
+
+
+@login_required
+def save_buying_prices(request):
+    """Owner-only view to save buying prices."""
+    if not request.user.is_superuser:
+        return JsonResponse({'success': False, 'error': 'Unauthorized'}, status=403)
+    
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Invalid request'}, status=400)
+    
+    date = _parse_date(request.POST.get('date'))
+    if not date:
+        return JsonResponse({'success': False, 'error': 'Invalid date'}, status=400)
+    
+    with transaction.atomic():
+        for product in MeatProduct.objects.all():
+            price_key = f'price_{product.id}'
+            qty_key = f'quantity_{product.id}'
+            notes_key = f'notes_{product.id}'
+            
+            buying_price = request.POST.get(price_key)
+            quantity = request.POST.get(qty_key)
+            notes = request.POST.get(notes_key, '')
+            
+            if buying_price and quantity:
+                try:
+                    buying_price = Decimal(buying_price)
+                    quantity = Decimal(quantity)
+                    
+                    # Update or create buying price
+                    BuyingPrice.objects.update_or_create(
+                        product=product,
+                        date=date,
+                        defaults={
+                            'buying_price_per_kg': buying_price,
+                            'quantity_received': quantity,
+                            'notes': notes,
+                            'recorded_by': request.user,
+                        }
+                    )
+                except (InvalidOperation, ValueError):
+                    continue
+    
+    messages.success(request, 'Buying prices saved successfully.')
+    return JsonResponse({'success': True})
+
+
+def _get_buying_price_for_date(product, date):
+    """Get the buying price for a product on a specific date."""
+    # Try to get buying price for the exact date
+    buying_price = BuyingPrice.objects.filter(product=product, date=date).first()
+    if buying_price:
+        return buying_price.buying_price_per_kg
+    
+    # If no exact match, get the most recent previous buying price
+    buying_price = BuyingPrice.objects.filter(
+        product=product,
+        date__lt=date
+    ).order_by('-date').first()
+    
+    if buying_price:
+        return buying_price.buying_price_per_kg
+    
+    # Fall back to product's default buying price
+    return product.buying_price
+
+
 def _compute_profit_loss(butchery_id, start_date, end_date):
     qs = DailyStock.objects.select_related('product')
     if start_date:
@@ -481,6 +570,9 @@ def _compute_profit_loss(butchery_id, start_date, end_date):
     prod = {}
     total_revenue = total_cogs = wastage_cost = Decimal('0.00')
     for ds in qs:
+        # Get the actual buying price for this date
+        buying_price = _get_buying_price_for_date(ds.product, ds.date)
+        
         row = prod.setdefault(ds.product.name, {
             'name': ds.product.name,
             'sold': Decimal('0'),
@@ -490,11 +582,12 @@ def _compute_profit_loss(butchery_id, start_date, end_date):
         })
         row['sold'] += ds.sold
         row['revenue'] += ds.revenue
-        row['cogs'] += ds.cost_of_sales
+        # Calculate COGS using actual buying price
+        row['cogs'] += ds.sold * buying_price
         row['wastage'] += ds.wastage
         total_revenue += ds.revenue
-        total_cogs += ds.cost_of_sales
-        wastage_cost += ds.wastage * ds.product.buying_price
+        total_cogs += ds.sold * buying_price
+        wastage_cost += ds.wastage * buying_price
 
     per_product = list(prod.values())
     for row in per_product:
