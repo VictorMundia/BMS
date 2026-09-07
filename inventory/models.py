@@ -245,6 +245,36 @@ class Shift(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Date permissions for editing past/future data
+# ---------------------------------------------------------------------------
+class DatePermission(models.Model):
+    """Grants permission to a user to edit data for specific dates."""
+    PERMISSION_TYPE_CHOICES = [
+        ('EDIT', 'Edit existing data'),
+        ('BACKFILL', 'Add missing data'),
+        ('FULL', 'Full access (edit and backfill)'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='date_permissions')
+    butchery = models.ForeignKey(Butchery, on_delete=models.CASCADE, related_name='date_permissions')
+    date = models.DateField(help_text="The date for which permission is granted")
+    permission_type = models.CharField(max_length=10, choices=PERMISSION_TYPE_CHOICES, default='FULL')
+    granted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='granted_permissions'
+    )
+    granted_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, help_text="Reason for granting permission")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('user', 'butchery', 'date')
+        ordering = ['-date', '-granted_at']
+
+    def __str__(self):
+        return f"{self.user.username} - {self.butchery.name} - {self.date} ({self.permission_type})"
+
+
+# ---------------------------------------------------------------------------
 # Stock transfers
 # ---------------------------------------------------------------------------
 class StockTransfer(models.Model):

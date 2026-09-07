@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from .models import (
     MeatCategory, Butchery, MeatProduct, StockMovement,
     DailyStock, DailyBranchSummary, ExpenseCategory, Expense,
-    Staff, Shift, StockTransfer, AuditLog,
+    Staff, Shift, StockTransfer, AuditLog, DatePermission,
 )
 
 
@@ -126,3 +126,17 @@ class AuditLogAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(DatePermission)
+class DatePermissionAdmin(admin.ModelAdmin):
+    """Admin interface for managing date permissions."""
+    list_display = ('user', 'butchery', 'date', 'permission_type', 'is_active', 'granted_by', 'granted_at')
+    list_filter = ('permission_type', 'is_active', 'date', 'butchery')
+    search_fields = ('user__username', 'user__email', 'butchery__name', 'notes')
+    readonly_fields = ('granted_at',)
+    
+    def save_model(self, request, obj, form, change):
+        if not change:  # Only set granted_by when creating new permission
+            obj.granted_by = request.user
+        super().save_model(request, obj, form, change)

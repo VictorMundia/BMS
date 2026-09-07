@@ -20,7 +20,7 @@ from .forms import (
 )
 from .models import (
     MeatProduct, StockMovement, DailyStock, DailyBranchSummary, Butchery,
-    Expense, ExpenseCategory, Staff, StockTransfer, AuditLog,
+    Expense, ExpenseCategory, Staff, StockTransfer, AuditLog, DatePermission,
 )
 from .utils import send_low_stock_alert, log_action
 
@@ -224,10 +224,19 @@ def daily_stock_entry(request):
         butchery = get_object_or_404(Butchery, pk=request.POST.get('butchery'))
         post_date = _parse_date(request.POST.get('date')) or localdate()
         
-        # Date validation: non-superusers can only edit today's data
+        # Date validation: non-superusers can only edit today's data unless they have permission
         if not request.user.is_superuser and post_date != localdate():
-            messages.error(request, 'You can only edit data for today. Past days are read-only. Contact the admin to make changes to past dates.')
-            return redirect(f"{reverse('daily_stock_readonly')}?butchery_id={butchery.id}&date={post_date}")
+            # Check if user has permission for this date and butchery
+            has_permission = DatePermission.objects.filter(
+                user=request.user,
+                butchery=butchery,
+                date=post_date,
+                is_active=True
+            ).exists()
+            
+            if not has_permission:
+                messages.error(request, 'You can only edit data for today. Past days are read-only. Contact the admin to make changes to past dates.')
+                return redirect(f"{reverse('daily_stock_readonly')}?butchery_id={butchery.id}&date={post_date}")
         
         with transaction.atomic():
             for product in butchery.products.all():
@@ -339,6 +348,20 @@ def daily_stock_entry(request):
         or branches.filter(pk=request.GET.get('butchery')).first()
         or branches.first()
     )
+    
+    # Check if user has permission for this date and butchery (for non-superusers on past dates)
+    has_date_permission = False
+    if not request.user.is_superuser and date != localdate() and selected:
+        has_date_permission = DatePermission.objects.filter(
+            user=request.user,
+            butchery=selected,
+            date=date,
+            is_active=True
+        ).exists()
+    elif request.user.is_superuser:
+        has_date_permission = True
+    elif date == localdate():
+        has_date_permission = True
     rows = []
     if selected:
         for product in selected.products.select_related('category'):
@@ -368,6 +391,7 @@ def daily_stock_entry(request):
         'rows': rows,
         'date': date.isoformat(),
         'today': localdate().isoformat(),
+        'has_date_permission': has_date_permission,
         'mpesa_amount': summary.mpesa_amount if summary else '',
         'notes': summary.notes if summary else '',
     }
