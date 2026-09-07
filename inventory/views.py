@@ -226,11 +226,12 @@ def daily_stock_entry(request):
         
         # Date validation: non-superusers can only edit today's data unless they have permission
         if not request.user.is_superuser and post_date != localdate():
-            # Check if user has permission for this date and butchery
+            # Check if user has permission for this date and butchery (using date ranges)
             has_permission = DatePermission.objects.filter(
                 user=request.user,
                 butchery=butchery,
-                date=post_date,
+                start_date__lte=post_date,
+                end_date__gte=post_date,
                 is_active=True
             ).exists()
             
@@ -355,7 +356,8 @@ def daily_stock_entry(request):
         has_date_permission = DatePermission.objects.filter(
             user=request.user,
             butchery=selected,
-            date=date,
+            start_date__lte=date,
+            end_date__gte=date,
             is_active=True
         ).exists()
     elif request.user.is_superuser:

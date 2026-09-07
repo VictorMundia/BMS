@@ -248,7 +248,7 @@ class Shift(models.Model):
 # Date permissions for editing past/future data
 # ---------------------------------------------------------------------------
 class DatePermission(models.Model):
-    """Grants permission to a user to edit data for specific dates."""
+    """Grants permission to a user to edit data for specific date ranges."""
     PERMISSION_TYPE_CHOICES = [
         ('EDIT', 'Edit existing data'),
         ('BACKFILL', 'Add missing data'),
@@ -257,7 +257,8 @@ class DatePermission(models.Model):
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='date_permissions')
     butchery = models.ForeignKey(Butchery, on_delete=models.CASCADE, related_name='date_permissions')
-    date = models.DateField(help_text="The date for which permission is granted")
+    start_date = models.DateField(help_text="Start date of the permission range", default=today)
+    end_date = models.DateField(help_text="End date of the permission range", default=today)
     permission_type = models.CharField(max_length=10, choices=PERMISSION_TYPE_CHOICES, default='FULL')
     granted_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name='granted_permissions'
@@ -267,11 +268,16 @@ class DatePermission(models.Model):
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ('user', 'butchery', 'date')
-        ordering = ['-date', '-granted_at']
+        ordering = ['-start_date', '-granted_at']
 
     def __str__(self):
-        return f"{self.user.username} - {self.butchery.name} - {self.date} ({self.permission_type})"
+        if self.start_date == self.end_date:
+            return f"{self.user.username} - {self.butchery.name} - {self.start_date} ({self.permission_type})"
+        return f"{self.user.username} - {self.butchery.name} - {self.start_date} to {self.end_date} ({self.permission_type})"
+    
+    def covers_date(self, date):
+        """Check if this permission covers a specific date."""
+        return self.start_date <= date <= self.end_date
 
 
 # ---------------------------------------------------------------------------

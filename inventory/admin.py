@@ -131,17 +131,16 @@ class AuditLogAdmin(admin.ModelAdmin):
 @admin.register(DatePermission)
 class DatePermissionAdmin(admin.ModelAdmin):
     """Admin interface for managing date permissions."""
-    list_display = ('get_user_display', 'butchery', 'date', 'get_permission_type_display', 'is_active', 'granted_by', 'granted_at')
-    list_filter = ('permission_type', 'is_active', 'date', 'butchery')
+    list_display = ('get_user_display', 'butchery', 'get_date_range_display', 'get_permission_type_display', 'is_active', 'granted_by', 'granted_at')
+    list_filter = ('permission_type', 'is_active', 'butchery')
     search_fields = ('user__username', 'user__email', 'user__first_name', 'user__last_name', 'butchery__name', 'notes')
     readonly_fields = ('granted_at', 'granted_by')
     list_per_page = 25
-    date_hierarchy = 'date'
     
     fieldsets = (
         ('Permission Details', {
-            'fields': ('user', 'butchery', 'date', 'permission_type'),
-            'description': 'Select the user, branch, and date for this permission.'
+            'fields': ('user', 'butchery', 'start_date', 'end_date', 'permission_type'),
+            'description': 'Select the user, branch, and date range for this permission.'
         }),
         ('Status', {
             'fields': ('is_active',),
@@ -165,6 +164,14 @@ class DatePermissionAdmin(admin.ModelAdmin):
         return obj.user.username
     get_user_display.short_description = 'User'
     get_user_display.admin_order_field = 'user__username'
+    
+    def get_date_range_display(self, obj):
+        """Display date range in a readable format."""
+        if obj.start_date == obj.end_date:
+            return obj.start_date.strftime('%Y-%m-%d')
+        return f"{obj.start_date.strftime('%Y-%m-%d')} to {obj.end_date.strftime('%Y-%m-%d')}"
+    get_date_range_display.short_description = 'Date Range'
+    get_date_range_display.admin_order_field = 'start_date'
     
     def get_permission_type_display(self, obj):
         """Display permission type with color-coded badge."""
