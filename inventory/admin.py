@@ -131,10 +131,52 @@ class AuditLogAdmin(admin.ModelAdmin):
 @admin.register(DatePermission)
 class DatePermissionAdmin(admin.ModelAdmin):
     """Admin interface for managing date permissions."""
-    list_display = ('user', 'butchery', 'date', 'permission_type', 'is_active', 'granted_by', 'granted_at')
+    list_display = ('get_user_display', 'butchery', 'date', 'get_permission_type_display', 'is_active', 'granted_by', 'granted_at')
     list_filter = ('permission_type', 'is_active', 'date', 'butchery')
-    search_fields = ('user__username', 'user__email', 'butchery__name', 'notes')
-    readonly_fields = ('granted_at',)
+    search_fields = ('user__username', 'user__email', 'user__first_name', 'user__last_name', 'butchery__name', 'notes')
+    readonly_fields = ('granted_at', 'granted_by')
+    list_per_page = 25
+    date_hierarchy = 'date'
+    
+    fieldsets = (
+        ('Permission Details', {
+            'fields': ('user', 'butchery', 'date', 'permission_type'),
+            'description': 'Select the user, branch, and date for this permission.'
+        }),
+        ('Status', {
+            'fields': ('is_active',),
+            'description': 'Toggle whether this permission is currently active.'
+        }),
+        ('Additional Information', {
+            'fields': ('notes',),
+            'description': 'Optional notes explaining why this permission was granted.'
+        }),
+        ('Audit Information', {
+            'fields': ('granted_by', 'granted_at'),
+            'classes': ('collapse',),
+            'description': 'Automatically tracked information about who granted this permission and when.'
+        }),
+    )
+    
+    def get_user_display(self, obj):
+        """Display user with their full name if available."""
+        if obj.user.first_name and obj.user.last_name:
+            return f"{obj.user.get_full_name()} ({obj.user.username})"
+        return obj.user.username
+    get_user_display.short_description = 'User'
+    get_user_display.admin_order_field = 'user__username'
+    
+    def get_permission_type_display(self, obj):
+        """Display permission type with color-coded badge."""
+        colors = {
+            'EDIT': 'blue',
+            'BACKFILL': 'green', 
+            'FULL': 'purple',
+        }
+        color = colors.get(obj.permission_type, 'gray')
+        return f'<span style="background-color: {color}; color: white; padding: 2px 8px; border-radius: 4px; font-weight: bold;">{obj.get_permission_type_display()}</span>'
+    get_permission_type_display.short_description = 'Permission Type'
+    get_permission_type_display.allow_tags = True
     
     def save_model(self, request, obj, form, change):
         if not change:  # Only set granted_by when creating new permission
