@@ -117,7 +117,7 @@ LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/inventory/'
 
 # Session configuration
-SESSION_COOKIE_AGE = 86400  # 24 hours
+SESSION_COOKIE_AGE = 315360000  # 10 years (permanent session)
 SESSION_SAVE_EVERY_REQUEST = False
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
