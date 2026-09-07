@@ -173,9 +173,9 @@
         <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">M-Pesa Collections</h2>
             <label class="block text-sm text-gray-500 mb-1">Total amount received via M-Pesa today</label>
-            <input type="number" step="0.01" min="0" name="mpesa_amount" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5" placeholder="0.00"
+            <input type="number" step="0.01" min="0" name="mpesa_amount" id="mpesa-amount" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5" placeholder="0.00"
                    {% if not request.user.is_superuser and date != today %}disabled{% endif %}>
-            <p class="text-xs text-gray-400 mt-2">Cash at hand = Revenue - M-Pesa</p>
+            <p class="text-xs text-gray-400 mt-2">Cash at hand = <span id="cash-at-hand">0.00</span> (Revenue - M-Pesa)</p>
         </div>
         <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Notes to Owner</h2>
@@ -233,6 +233,11 @@
             totalRev += rev;
         });
         document.getElementById('total-revenue').textContent = totalRev.toFixed(2);
+        
+        // Calculate cash at hand = Revenue - M-Pesa
+        const mpesaAmount = parseFloat(document.getElementById('mpesa-amount').value) || 0;
+        const cashAtHand = totalRev - mpesaAmount;
+        document.getElementById('cash-at-hand').textContent = cashAtHand.toFixed(2);
     }
     document.getElementById('entry-form').addEventListener('input', recalc);
 
