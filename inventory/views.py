@@ -221,125 +221,144 @@ def daily_stock_entry(request):
             pass
 
     if request.method == 'POST':
-        butchery = get_object_or_404(Butchery, pk=request.POST.get('butchery'))
-        post_date = _parse_date(request.POST.get('date')) or localdate()
-        
-        # Date validation: non-superusers can only edit today's data unless they have permission
-        if not request.user.is_superuser and post_date != localdate():
-            # Check if user has permission for this date and butchery (using date ranges)
-            has_permission = DatePermission.objects.filter(
-                user=request.user,
-                butchery=butchery,
-                start_date__lte=post_date,
-                end_date__gte=post_date,
-                is_active=True
-            ).exists()
+        try:
+            butchery_id = request.POST.get('butchery')
+            if not butchery_id:
+                messages.error(request, 'Branch selection is required.')
+                return redirect('daily_stock_entry')
             
-            if not has_permission:
-                messages.error(request, 'You can only edit data for today. Past days are read-only. Contact the admin to make changes to past dates.')
-                return redirect(f"{reverse('daily_stock_readonly')}?butchery_id={butchery.id}&date={post_date}")
+            butchery = get_object_or_404(Butchery, pk=butchery_id)
+            post_date = _parse_date(request.POST.get('date')) or localdate()
+            
+            # Date validation: non-superusers can only edit today's data unless they have permission
+            if not request.user.is_superuser and post_date != localdate():
+                # Check if user has permission for this date and butchery (using date ranges)
+                try:
+                    has_permission = DatePermission.objects.filter(
+                        user=request.user,
+                        butchery=butchery,
+                        start_date__lte=post_date,
+                        end_date__gte=post_date,
+                        is_active=True
+                    ).exists()
+                except Exception as e:
+                    # If permission check fails, deny access by default
+                    has_permission = False
+                
+                if not has_permission:
+                    messages.error(request, 'You can only edit data for today. Past days are read-only. Contact the admin to make changes to past dates.')
+                    return redirect(f"{reverse('daily_stock_readonly')}?butchery_id={butchery.id}&date={post_date}")
+        except Exception as e:
+            messages.error(request, f'Error processing request: {str(e)}')
+            return redirect('daily_stock_entry')
         
-        with transaction.atomic():
-            for product in butchery.products.all():
-                received = _to_decimal(request.POST.get(f'received_{product.id}'))
-                closing = _to_decimal(request.POST.get(f'closing_{product.id}'))
-                wastage = _to_decimal(request.POST.get(f'wastage_{product.id}'))
-                opening = _opening_for(product, post_date)
-                
-                # Handle multiple transfers
-                transfer_to_ids = request.POST.getlist(f'transfer_to_{product.id}')
-                transfer_quantities = request.POST.getlist(f'transfer_quantity_{product.id}')
-                
-                total_transferred = Decimal('0')
-                for transfer_to_id, transfer_quantity in zip(transfer_to_ids, transfer_quantities):
-                    transfer_to_id = transfer_to_id.strip()
-                    transfer_quantity = _to_decimal(transfer_quantity)
+        try:
+            with transaction.atomic():
+                for product in butchery.products.all():
+                    received = _to_decimal(request.POST.get(f'received_{product.id}'))
+                    closing = _to_decimal(request.POST.get(f'closing_{product.id}'))
+                    wastage = _to_decimal(request.POST.get(f'wastage_{product.id}'))
+                    opening = _opening_for(product, post_date)
                     
-                    if transfer_to_id and transfer_quantity > 0:
-                        transfer_to = get_object_or_404(Butchery, pk=transfer_to_id)
+                    # Handle multiple transfers
+                    transfer_to_ids = request.POST.getlist(f'transfer_to_{product.id}')
+                    transfer_quantities = request.POST.getlist(f'transfer_quantity_{product.id}')
+                    
+                    total_transferred = Decimal('0')
+                    for transfer_to_id, transfer_quantity in zip(transfer_to_ids, transfer_quantities):
+                        transfer_to_id = transfer_to_id.strip()
+                        transfer_quantity = _to_decimal(transfer_quantity)
                         
-                        # Validate that source has enough stock
-                        if opening + received < total_transferred + transfer_quantity:
-                            messages.error(request, f'Not enough stock for {product.name} to transfer {transfer_quantity} to {transfer_to.name}')
-                            return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
-                        
-                        # Find the same product in the destination branch
-                        dest_product = MeatProduct.objects.filter(
-                            name=product.name,
-                            butchery=transfer_to,
-                            category=product.category
-                        ).first()
-                        
-                        if dest_product:
-                            # Create incoming transfer for destination branch
-                            dest_opening = _opening_for(dest_product, post_date)
-                            dest_daily = DailyStock.objects.filter(product=dest_product, date=post_date).first()
-                            dest_received = dest_daily.received if dest_daily else Decimal('0')
-                            dest_closing = dest_daily.closing_stock if dest_daily else dest_opening
-                            dest_wastage = dest_daily.wastage if dest_daily else Decimal('0')
+                        if transfer_to_id and transfer_quantity > 0:
+                            transfer_to = get_object_or_404(Butchery, pk=transfer_to_id)
                             
-                            DailyStock.objects.update_or_create(
-                                product=dest_product, date=post_date,
-                                defaults={
-                                    'opening_stock': dest_opening,
-                                    'received': dest_received + transfer_quantity,
-                                    'closing_stock': dest_closing + transfer_quantity,
-                                    'wastage': dest_wastage,
-                                    'recorded_by': request.user,
-                                },
-                            )
-                            # Update destination product's current stock
-                            dest_product.current_stock = dest_closing + transfer_quantity
-                            dest_product.save()
-                            total_transferred += transfer_quantity
-                            messages.success(request, f'Transferred {transfer_quantity} {product.name} to {transfer_to.name}')
-                
-                DailyStock.objects.update_or_create(
-                    product=product, date=post_date,
-                    defaults={
-                        'opening_stock': opening,
-                        'received': received,
-                        'closing_stock': closing,
-                        'wastage': wastage,
-                        'recorded_by': request.user,
-                    },
-                )
-                
-                # Create DailyTransfer records
-                daily_stock = DailyStock.objects.get(product=product, date=post_date)
-                for transfer_to_id, transfer_quantity in zip(transfer_to_ids, transfer_quantities):
-                    transfer_to_id = transfer_to_id.strip()
-                    transfer_quantity = _to_decimal(transfer_quantity)
+                            # Validate that source has enough stock
+                            if opening + received < total_transferred + transfer_quantity:
+                                messages.error(request, f'Not enough stock for {product.name} to transfer {transfer_quantity} to {transfer_to.name}')
+                                return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
+                            
+                            # Find the same product in the destination branch
+                            dest_product = MeatProduct.objects.filter(
+                                name=product.name,
+                                butchery=transfer_to,
+                                category=product.category
+                            ).first()
+                            
+                            if dest_product:
+                                # Create incoming transfer for destination branch
+                                dest_opening = _opening_for(dest_product, post_date)
+                                dest_daily = DailyStock.objects.filter(product=dest_product, date=post_date).first()
+                                dest_received = dest_daily.received if dest_daily else Decimal('0')
+                                dest_closing = dest_daily.closing_stock if dest_daily else dest_opening
+                                dest_wastage = dest_daily.wastage if dest_daily else Decimal('0')
+                                
+                                DailyStock.objects.update_or_create(
+                                    product=dest_product, date=post_date,
+                                    defaults={
+                                        'opening_stock': dest_opening,
+                                        'received': dest_received + transfer_quantity,
+                                        'closing_stock': dest_closing + transfer_quantity,
+                                        'wastage': dest_wastage,
+                                        'recorded_by': request.user,
+                                    },
+                                )
+                                # Update destination product's current stock
+                                dest_product.current_stock = dest_closing + transfer_quantity
+                                dest_product.save()
+                                total_transferred += transfer_quantity
+                                messages.success(request, f'Transferred {transfer_quantity} {product.name} to {transfer_to.name}')
                     
-                    if transfer_to_id and transfer_quantity > 0:
-                        transfer_to = get_object_or_404(Butchery, pk=transfer_to_id)
-                        DailyTransfer.objects.create(
-                            source_daily_stock=daily_stock,
-                            to_butchery=transfer_to,
-                            quantity=transfer_quantity,
-                        )
-                
-                MeatProduct.objects.filter(pk=product.pk).update(current_stock=closing)
-            for amount, desc in zip(
-                request.POST.getlist('exp_amount'),
-                request.POST.getlist('exp_description'),
-            ):
-                amt = _to_decimal(amount)
-                if desc and amt > 0:
-                    Expense.objects.create(
-                        butchery=butchery, amount=amt,
-                        description=desc, date=post_date, recorded_by=request.user,
+                    DailyStock.objects.update_or_create(
+                        product=product, date=post_date,
+                        defaults={
+                            'opening_stock': opening,
+                            'received': received,
+                            'closing_stock': closing,
+                            'wastage': wastage,
+                            'recorded_by': request.user,
+                        },
                     )
-            mpesa_amt = _to_decimal(request.POST.get('mpesa_amount') or 0)
-            notes = request.POST.get('notes', '').strip()
-            DailyBranchSummary.objects.update_or_create(
-                butchery=butchery, date=post_date,
-                defaults={'mpesa_amount': mpesa_amt, 'notes': notes, 'recorded_by': request.user},
-            )
-            log_action(
-                request.user, 'DAILY_STOCK', 'DailyStock', 0,
-                f"Daily entry for {butchery.name} on {post_date}", request,
-            )
+                    
+                    # Create DailyTransfer records
+                    daily_stock = DailyStock.objects.get(product=product, date=post_date)
+                    for transfer_to_id, transfer_quantity in zip(transfer_to_ids, transfer_quantities):
+                        transfer_to_id = transfer_to_id.strip()
+                        transfer_quantity = _to_decimal(transfer_quantity)
+                        
+                        if transfer_to_id and transfer_quantity > 0:
+                            transfer_to = get_object_or_404(Butchery, pk=transfer_to_id)
+                            DailyTransfer.objects.create(
+                                source_daily_stock=daily_stock,
+                                to_butchery=transfer_to,
+                                quantity=transfer_quantity,
+                            )
+                    
+                    MeatProduct.objects.filter(pk=product.pk).update(current_stock=closing)
+                
+                for amount, desc in zip(
+                    request.POST.getlist('exp_amount'),
+                    request.POST.getlist('exp_description'),
+                ):
+                    amt = _to_decimal(amount)
+                    if desc and amt > 0:
+                        Expense.objects.create(
+                            butchery=butchery, amount=amt,
+                            description=desc, date=post_date, recorded_by=request.user,
+                        )
+                mpesa_amt = _to_decimal(request.POST.get('mpesa_amount') or 0)
+                notes = request.POST.get('notes', '').strip()
+                DailyBranchSummary.objects.update_or_create(
+                    butchery=butchery, date=post_date,
+                    defaults={'mpesa_amount': mpesa_amt, 'notes': notes, 'recorded_by': request.user},
+                )
+                log_action(
+                    request.user, 'DAILY_STOCK', 'DailyStock', 0,
+                    f"Daily entry for {butchery.name} on {post_date}", request,
+                )
+        except Exception as e:
+            messages.error(request, f'Error saving data: {str(e)}')
+            return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
+        
         messages.success(request, 'Daily stock and expenses saved successfully.')
         return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
 
