@@ -23,6 +23,7 @@ CSRF_TRUSTED_ORIGINS = [
     'http://localhost:64897',
     'http://127.0.0.1:51560',
     'http://localhost:51560',
+    'https://bms-app-d4f68461bed5.herokuapp.com',
 ]
 
 
