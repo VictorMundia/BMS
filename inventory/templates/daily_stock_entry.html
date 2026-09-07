@@ -193,61 +193,62 @@
 </form>
 
 <script>
-(function(){
-    function addTransferRow(productId) {
-        const container = document.getElementById('transfer-container-' + productId);
-        const newRow = document.createElement('div');
-        newRow.className = 'transfer-row flex gap-2 mb-1';
-        newRow.innerHTML = `
-            <select name="transfer_to_${productId}" class="transfer-to w-28 bg-gray-50 border border-gray-300 rounded-lg p-2">
-                <option value="">None</option>
-                {% for b in branches %}
-                    {% if b.id != selected.id %}
-                    <option value="{{ b.id }}">{{ b.name }}</option>
-                    {% endif %}
-                {% endfor %}
-            </select>
-            <input type="number" step="0.01" min="0" name="transfer_quantity_${productId}"
-                   value="" class="transfer-quantity w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
-        `;
-        container.appendChild(newRow);
-    }
+function addTransferRow(productId) {
+    const container = document.getElementById('transfer-container-' + productId);
+    const newRow = document.createElement('div');
+    newRow.className = 'transfer-row flex gap-2 mb-1';
+    newRow.innerHTML = `
+        <select name="transfer_to_${productId}" class="transfer-to w-28 bg-gray-50 border border-gray-300 rounded-lg p-2"
+                {% if not has_date_permission %}disabled{% endif %}>
+            <option value="">None</option>
+            {% for b in branches %}
+                {% if b.id != selected.id %}
+                <option value="{{ b.id }}">{{ b.name }}</option>
+                {% endif %}
+            {% endfor %}
+        </select>
+        <input type="number" step="0.01" min="0" name="transfer_quantity_${productId}"
+               value="" class="transfer-quantity w-24 bg-gray-50 border border-gray-300 rounded-lg p-2"
+               {% if not has_date_permission %}disabled{% endif %}>
+    `;
+    container.appendChild(newRow);
+}
 
-    function recalc(){
-        let totalRev = 0;
-        document.querySelectorAll('.stock-row').forEach(function(row){
-            const opening = parseFloat(row.dataset.opening) || 0;
-            const selling = parseFloat(row.dataset.selling) || 0;
-            const received = parseFloat(row.querySelector('.received').value) || 0;
-            let totalTransferQty = 0;
-            row.querySelectorAll('.transfer-quantity').forEach(function(input){
-                totalTransferQty += parseFloat(input.value) || 0;
-            });
-            const wastage = parseFloat(row.querySelector('.wastage').value) || 0;
-            const closing = parseFloat(row.querySelector('.closing').value) || 0;
-            let sold = opening + received - totalTransferQty - wastage - closing;
-            if(sold < 0) sold = 0;
-            const rev = sold * selling;
-            row.querySelector('.sold-cell').textContent = sold.toFixed(2);
-            row.querySelector('.revenue-cell').textContent = rev.toFixed(2);
-            totalRev += rev;
+function recalc(){
+    let totalRev = 0;
+    document.querySelectorAll('.stock-row').forEach(function(row){
+        const opening = parseFloat(row.dataset.opening) || 0;
+        const selling = parseFloat(row.dataset.selling) || 0;
+        const received = parseFloat(row.querySelector('.received').value) || 0;
+        let totalTransferQty = 0;
+        row.querySelectorAll('.transfer-quantity').forEach(function(input){
+            totalTransferQty += parseFloat(input.value) || 0;
         });
-        document.getElementById('total-revenue').textContent = totalRev.toFixed(2);
-        
-        // Calculate cash at hand = Revenue - M-Pesa
-        const mpesaAmount = parseFloat(document.getElementById('mpesa-amount').value) || 0;
-        const cashAtHand = totalRev - mpesaAmount;
-        document.getElementById('cash-at-hand').textContent = cashAtHand.toFixed(2);
-    }
-    document.getElementById('entry-form').addEventListener('input', recalc);
-
-    const tmpl = document.getElementById('expense-row-template');
-    document.getElementById('add-expense').addEventListener('click', function(){
-        document.getElementById('expense-body').appendChild(tmpl.content.cloneNode(true));
+        const wastage = parseFloat(row.querySelector('.wastage').value) || 0;
+        const closing = parseFloat(row.querySelector('.closing').value) || 0;
+        let sold = opening + received - totalTransferQty - wastage - closing;
+        if(sold < 0) sold = 0;
+        const rev = sold * selling;
+        row.querySelector('.sold-cell').textContent = sold.toFixed(2);
+        row.querySelector('.revenue-cell').textContent = rev.toFixed(2);
+        totalRev += rev;
     });
+    document.getElementById('total-revenue').textContent = totalRev.toFixed(2);
+    
+    // Calculate cash at hand = Revenue - M-Pesa
+    const mpesaAmount = parseFloat(document.getElementById('mpesa-amount').value) || 0;
+    const cashAtHand = totalRev - mpesaAmount;
+    document.getElementById('cash-at-hand').textContent = cashAtHand.toFixed(2);
+}
 
-    recalc();
-})();
+document.getElementById('entry-form').addEventListener('input', recalc);
+
+const tmpl = document.getElementById('expense-row-template');
+document.getElementById('add-expense').addEventListener('click', function(){
+    document.getElementById('expense-body').appendChild(tmpl.content.cloneNode(true));
+});
+
+recalc();
 </script>
 {% else %}
 <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 text-center text-gray-400">
