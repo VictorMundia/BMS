@@ -20,7 +20,7 @@ from .forms import (
 )
 from .models import (
     MeatProduct, StockMovement, DailyStock, DailyBranchSummary, Butchery,
-    Expense, ExpenseCategory, Staff, StockTransfer, AuditLog, DatePermission, BuyingPrice,
+    Expense, ExpenseCategory, Staff, StockTransfer, AuditLog, DatePermission, BuyingPrice, DailyTransfer,
 )
 from .utils import send_low_stock_alert, log_action
 
