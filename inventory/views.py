@@ -277,36 +277,8 @@ def daily_stock_entry(request):
                                 messages.error(request, f'Not enough stock for {product.name} to transfer {transfer_quantity} to {transfer_to.name}')
                                 return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
                             
-                            # Find the same product in the destination branch
-                            dest_product = MeatProduct.objects.filter(
-                                name=product.name,
-                                butchery=transfer_to,
-                                category=product.category
-                            ).first()
-                            
-                            if dest_product:
-                                # Create incoming transfer for destination branch
-                                dest_opening = _opening_for(dest_product, post_date)
-                                dest_daily = DailyStock.objects.filter(product=dest_product, date=post_date).first()
-                                dest_received = dest_daily.received if dest_daily else Decimal('0')
-                                dest_closing = dest_daily.closing_stock if dest_daily else dest_opening
-                                dest_wastage = dest_daily.wastage if dest_daily else Decimal('0')
-                                
-                                DailyStock.objects.update_or_create(
-                                    product=dest_product, date=post_date,
-                                    defaults={
-                                        'opening_stock': dest_opening,
-                                        'received': dest_received + transfer_quantity,
-                                        'closing_stock': dest_closing + transfer_quantity,
-                                        'wastage': dest_wastage,
-                                        'recorded_by': request.user,
-                                    },
-                                )
-                                # Update destination product's current stock
-                                dest_product.current_stock = dest_closing + transfer_quantity
-                                dest_product.save()
-                                total_transferred += transfer_quantity
-                                messages.success(request, f'Transferred {transfer_quantity} {product.name} to {transfer_to.name}')
+                            total_transferred += transfer_quantity
+                            messages.success(request, f'Transferred {transfer_quantity} {product.name} to {transfer_to.name}')
                     
                     DailyStock.objects.update_or_create(
                         product=product, date=post_date,
