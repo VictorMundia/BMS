@@ -1,6 +1,6 @@
 import csv
 from collections import defaultdict
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, time
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
@@ -55,6 +55,15 @@ def _to_decimal(value):
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return Decimal('0')
+
+
+def _business_date():
+    """Returns the current business day (day rolls over at 1am instead of midnight)."""
+    current_time = now().time()
+    if current_time < time(1, 0):
+        # Before 1am, consider it as the previous business day
+        return localdate() - timedelta(days=1)
+    return localdate()
 
 
 def _opening_for(product, date):
@@ -228,10 +237,10 @@ def daily_stock_entry(request):
                 return redirect('daily_stock_entry')
             
             butchery = get_object_or_404(Butchery, pk=butchery_id)
-            post_date = _parse_date(request.POST.get('date')) or localdate()
+            post_date = _parse_date(request.POST.get('date')) or _business_date()
             
             # Date validation: non-superusers can only edit today's data unless they have permission
-            if not request.user.is_superuser and post_date != localdate():
+            if not request.user.is_superuser and post_date != _business_date():
                 # Check if user has permission for this date and butchery (using date ranges)
                 try:
                     has_permission = DatePermission.objects.filter(
@@ -334,7 +343,7 @@ def daily_stock_entry(request):
         messages.success(request, 'Daily stock and expenses saved successfully.')
         return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
 
-    date = _parse_date(request.GET.get('date')) or localdate()
+    date = _parse_date(request.GET.get('date')) or _business_date()
     selected = (
         locked_branch
         or branches.filter(pk=request.GET.get('butchery')).first()
@@ -343,7 +352,7 @@ def daily_stock_entry(request):
     
     # Check if user has permission for this date and butchery (for non-superusers on past dates)
     has_date_permission = False
-    if not request.user.is_superuser and date != localdate() and selected:
+    if not request.user.is_superuser and date != _business_date() and selected:
         has_date_permission = DatePermission.objects.filter(
             user=request.user,
             butchery=selected,
@@ -353,7 +362,7 @@ def daily_stock_entry(request):
         ).exists()
     elif request.user.is_superuser:
         has_date_permission = True
-    elif date == localdate():
+    elif date == _business_date():
         has_date_permission = True
     rows = []
     if selected:
@@ -383,7 +392,7 @@ def daily_stock_entry(request):
         'selected': selected,
         'rows': rows,
         'date': date.isoformat(),
-        'today': localdate().isoformat(),
+        'today': _business_date().isoformat(),
         'has_date_permission': has_date_permission,
         'mpesa_amount': summary.mpesa_amount if summary else '',
         'notes': summary.notes if summary else '',
