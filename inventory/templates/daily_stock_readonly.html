@@ -64,8 +64,6 @@
 <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Incoming Transfers</h2>
     {% if rows %}
-    {% with transfers_exist=rows|selectattr:'transfers_in'|list %}
-    {% if transfers_exist %}
     <div class="overflow-x-auto">
         <table class="w-full text-sm text-left text-gray-600">
             <thead class="text-xs text-gray-700 uppercase bg-gray-50">
@@ -85,15 +83,15 @@
                     <td class="px-3 py-2 text-blue-600">{{ transfer.source_daily_stock.product.butchery.name }}</td>
                     <td class="px-3 py-2">{{ transfer.source_daily_stock.date }}</td>
                 </tr>
+                {% empty %}
+                {% if forloop.parentloop.last %}
+                <tr><td colspan="4" class="px-3 py-3 text-center text-gray-400">No incoming transfers for this day.</td></tr>
+                {% endif %}
                 {% endfor %}
                 {% endfor %}
             </tbody>
         </table>
     </div>
-    {% else %}
-    <p class="text-gray-400">No incoming transfers for this day.</p>
-    {% endif %}
-    {% endwith %}
     {% else %}
     <p class="text-gray-400">No stock entries for this day.</p>
     {% endif %}
