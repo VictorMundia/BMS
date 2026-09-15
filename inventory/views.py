@@ -420,7 +420,7 @@ def daily_stock_readonly(request):
             'revenue': existing.revenue if existing else Decimal('0'),
         }
         if existing:
-            row['transfers_out'] = existing.transfers_out.all()
+            row['transfers_out'] = existing.transfers_out.select_related('to_butchery')
             row['transfers_in'] = branch.daily_transfers_in.filter(
                 source_daily_stock__product=product,
                 source_daily_stock__date=date
