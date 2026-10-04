@@ -36,16 +36,40 @@
 </div>
 
 {% if selected %}
-{% if not has_date_permission %}
-    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-        <p class="text-yellow-800 text-sm">⚠️ This data is read-only. You can only edit data for today. Contact the admin to make changes to past dates.</p>
-    </div>
+{% if summary %}
+<div class="mb-4 p-4 rounded-lg text-sm {% if summary.is_closed %}bg-gray-100 text-gray-800{% else %}bg-green-50 text-green-800{% endif %}">
+    {% if summary.is_closed %}
+        Closed by the owner{% if summary.closed_at %} on {{ summary.closed_at|date:"d M Y, H:i" }}{% endif %}.
+    {% else %}
+        Submitted{% if summary.recorded_by %} by {{ summary.recorded_by.username }}{% endif %}.{% if can_edit %} You can still correct it.{% endif %}
+    {% endif %}
+</div>
+{% else %}
+<div class="mb-4 p-4 rounded-lg text-sm bg-yellow-50 text-yellow-800">Not submitted yet for {{ date }}.</div>
+{% endif %}
+{% if not can_edit %}
+<div class="mb-4 p-4 rounded-lg text-sm bg-red-50 text-red-800">{{ block_reason }}</div>
 {% endif %}
 
-<form method="post" id="entry-form" {% if not has_date_permission %}onsubmit="return false;"{% endif %}>
+<template id="transfer-row-template">
+    <div class="transfer-row flex gap-2 mb-1">
+        <input type="hidden" name="transfer_id___PID__" value="">
+        <select name="transfer_to___PID__" class="transfer-to w-28 bg-gray-50 border border-gray-300 rounded-lg p-2">
+            <option value="">To branch</option>
+            {% for b in other_branches %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
+        </select>
+        <input type="number" step="0.01" min="0" inputmode="decimal" name="transfer_quantity___PID__"
+               class="transfer-quantity w-20 bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="Qty">
+        <button type="button" class="remove-row text-red-600 text-xs">&times;</button>
+    </div>
+</template>
+
+<form method="post" id="entry-form">
     {% csrf_token %}
+    <input type="hidden" name="form_version" value="2">
     <input type="hidden" name="butchery" value="{{ selected.id }}">
     <input type="hidden" name="date" value="{{ date }}">
+    <fieldset {% if not can_edit %}disabled{% endif %}>
 
     <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
         <h2 class="text-lg font-semibold text-gray-900 mb-4">{{ selected.name }} — Stock ({{ date }})</h2>
@@ -56,79 +80,66 @@
                         <th class="px-3 py-3">Product</th>
                         <th class="px-3 py-3">Opening</th>
                         <th class="px-3 py-3">Received</th>
-                        <th class="px-3 py-3">Transfers</th>
-                        <th class="px-3 py-3"></th>
+                        <th class="px-3 py-3">Transfers Out</th>
                         <th class="px-3 py-3">Wastage</th>
                         <th class="px-3 py-3">Remaining</th>
                         <th class="px-3 py-3">Sold</th>
                         <th class="px-3 py-3">Revenue</th>
-                        <th class="px-3 py-3">Transfer Info</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in rows %}
                     <tr class="border-b stock-row"
-                        data-selling="{{ row.product.selling_price }}"
+                        data-selling="{{ row.selling_price }}"
                         data-opening="{{ row.opening }}">
                         <td class="px-3 py-2 font-medium text-gray-900">
                             {{ row.product.name }}
                             <span class="text-xs text-gray-400">({{ row.product.get_unit_display }})</span>
+                            {% for t in row.transfers_in %}
+                            <span class="block text-xs text-blue-600">From {{ t.source_daily_stock.product.butchery.name }}: {{ t.quantity }}</span>
+                            {% endfor %}
                         </td>
                         <td class="px-3 py-2 opening-cell">{{ row.opening }}</td>
                         <td class="px-3 py-2">
-                            <input type="number" step="0.01" min="0" name="received_{{ row.product.id }}"
-                                   value="{{ row.received }}" class="received w-24 bg-gray-50 border border-gray-300 rounded-lg p-2"
-                                   {% if not has_date_permission %}disabled{% endif %}>
+                            <input type="number" step="0.01" min="0" inputmode="decimal" name="received_{{ row.product.id }}"
+                                   value="{{ row.received }}" class="received w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
                         </td>
                         <td class="px-3 py-2">
-                            <div id="transfer-container-{{ row.product.id }}">
+                            <div class="transfer-container" data-pid="{{ row.product.id }}">
+                                {% for t in row.transfers %}
                                 <div class="transfer-row flex gap-2 mb-1">
-                                    <select name="transfer_to_{{ row.product.id }}" class="transfer-to w-28 bg-gray-50 border border-gray-300 rounded-lg p-2"
-                                            {% if not has_date_permission %}disabled{% endif %}>
-                                        <option value="">None</option>
-                                        {% for b in branches %}
-                                            {% if b.id != selected.id %}
-                                            <option value="{{ b.id }}">{{ b.name }}</option>
-                                            {% endif %}
+                                    <input type="hidden" name="transfer_id_{{ row.product.id }}" value="{{ t.id|default_if_none:'' }}">
+                                    <select name="transfer_to_{{ row.product.id }}" class="transfer-to w-28 bg-gray-50 border border-gray-300 rounded-lg p-2">
+                                        <option value="">To branch</option>
+                                        {% for b in other_branches %}
+                                        <option value="{{ b.id }}" {% if t.to_id == b.id|stringformat:'s' %}selected{% endif %}>{{ b.name }}</option>
                                         {% endfor %}
                                     </select>
-                                    <input type="number" step="0.01" min="0" name="transfer_quantity_{{ row.product.id }}"
-                                           value="" class="transfer-quantity w-24 bg-gray-50 border border-gray-300 rounded-lg p-2"
-                                           {% if not has_date_permission %}disabled{% endif %}>
+                                    <input type="number" step="0.01" min="0" inputmode="decimal" name="transfer_quantity_{{ row.product.id }}"
+                                           value="{{ t.quantity }}" class="transfer-quantity w-20 bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="Qty">
+                                    <button type="button" class="remove-row text-red-600 text-xs">&times;</button>
                                 </div>
+                                {% endfor %}
                             </div>
-                            <button type="button" onclick="addTransferRow({{ row.product.id }})" class="text-xs text-blue-600 hover:underline"
-                                    {% if not has_date_permission %}disabled{% endif %}>+ Add Transfer</button>
-                        </td>
-                        <td class="px-3 py-2"></td>
-                        <td class="px-3 py-2">
-                            <input type="number" step="0.01" min="0" name="wastage_{{ row.product.id }}"
-                                   value="{{ row.wastage }}" class="wastage w-24 bg-gray-50 border border-gray-300 rounded-lg p-2"
-                                   {% if not has_date_permission %}disabled{% endif %}>
+                            <button type="button" class="add-transfer text-xs text-blue-600 hover:underline" data-pid="{{ row.product.id }}">+ Add Transfer</button>
                         </td>
                         <td class="px-3 py-2">
-                            <input type="number" step="0.01" min="0" name="closing_{{ row.product.id }}"
-                                   value="{{ row.closing }}" class="closing w-24 bg-gray-50 border border-gray-300 rounded-lg p-2"
-                                   {% if not has_date_permission %}disabled{% endif %}>
+                            <input type="number" step="0.01" min="0" inputmode="decimal" name="wastage_{{ row.product.id }}"
+                                   value="{{ row.wastage }}" class="wastage w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
+                        </td>
+                        <td class="px-3 py-2">
+                            <input type="number" step="0.01" min="0" inputmode="decimal" name="closing_{{ row.product.id }}"
+                                   value="{{ row.closing }}" class="closing w-24 bg-gray-50 border border-gray-300 rounded-lg p-2">
                         </td>
                         <td class="px-3 py-2 sold-cell font-medium">0</td>
                         <td class="px-3 py-2 revenue-cell font-medium">0.00</td>
-                        <td class="px-3 py-2 text-xs text-gray-500">
-                            {% for transfer in row.transfers_out %}
-                                To: {{ transfer.to_butchery.name }} ({{ transfer.quantity }})<br>
-                            {% endfor %}
-                            {% for transfer in row.transfers_in %}
-                                From: {{ transfer.source_daily_stock.product.butchery.name }} ({{ transfer.quantity }})<br>
-                            {% endfor %}
-                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
                 <tfoot>
                     <tr class="bg-gray-50 font-semibold text-gray-900">
-                        <td class="px-3 py-3" colspan="8">Estimated Revenue</td>
+                        <td class="px-3 py-3" colspan="7">Estimated Revenue</td>
                         <td class="px-3 py-3" id="total-revenue">0.00</td>
-                        <td class="px-3 py-3"></td>
                     </tr>
                 </tfoot>
             </table>
@@ -138,19 +149,41 @@
     <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold text-gray-900">Expenses for the day</h2>
-            <button type="button" id="add-expense" class="text-white bg-gray-800 hover:bg-gray-900 font-medium rounded-lg text-sm px-4 py-2"
-                    {% if not has_date_permission %}disabled{% endif %}>+ Add Expense</button>
+            <button type="button" id="add-expense" class="text-white bg-gray-800 hover:bg-gray-900 font-medium rounded-lg text-sm px-4 py-2">+ Add Expense</button>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full text-sm text-left text-gray-600">
                 <thead class="text-xs text-gray-700 uppercase bg-gray-50">
                     <tr>
                         <th class="px-3 py-3">Description</th>
+                        <th class="px-3 py-3">Category</th>
                         <th class="px-3 py-3">Amount</th>
+                        <th class="px-3 py-3"></th>
                     </tr>
                 </thead>
                 <tbody id="expense-body">
-                    <!-- expense rows injected here -->
+                    {% for exp in expenses %}
+                    <tr>
+                        <td class="px-3 py-2">
+                            <input type="hidden" name="exp_id" value="{{ exp.id|default_if_none:'' }}">
+                            <input type="text" name="exp_description" value="{{ exp.description }}" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="What was the expense?">
+                        </td>
+                        <td class="px-3 py-2">
+                            <select name="exp_category" class="bg-gray-50 border border-gray-300 rounded-lg p-2">
+                                <option value="">—</option>
+                                {% for c in categories %}
+                                <option value="{{ c.id }}" {% if exp.category_id == c.id|stringformat:'s' %}selected{% endif %}>{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="px-3 py-2">
+                            <input type="number" step="0.01" min="0" inputmode="decimal" name="exp_amount" value="{{ exp.amount }}" class="exp-amount w-28 bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="0.00">
+                        </td>
+                        <td class="px-3 py-2">
+                            <button type="button" class="remove-row text-red-600 hover:underline text-sm">Remove</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
                 </tbody>
             </table>
         </div>
@@ -159,96 +192,111 @@
     <template id="expense-row-template">
         <tr>
             <td class="px-3 py-2">
-                <input type="text" name="exp_description" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="What was the expense?"
-                       {% if not has_date_permission %}disabled{% endif %}>
+                <input type="hidden" name="exp_id" value="">
+                <input type="text" name="exp_description" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="What was the expense?">
             </td>
             <td class="px-3 py-2">
-                <input type="number" step="0.01" min="0" name="exp_amount" class="w-28 bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="0.00"
-                       {% if not has_date_permission %}disabled{% endif %}>
+                <select name="exp_category" class="bg-gray-50 border border-gray-300 rounded-lg p-2">
+                    <option value="">—</option>
+                    {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                </select>
+            </td>
+            <td class="px-3 py-2">
+                <input type="number" step="0.01" min="0" inputmode="decimal" name="exp_amount" class="exp-amount w-28 bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="0.00">
+            </td>
+            <td class="px-3 py-2">
+                <button type="button" class="remove-row text-red-600 hover:underline text-sm">Remove</button>
             </td>
         </tr>
     </template>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">M-Pesa Collections</h2>
             <label class="block text-sm text-gray-500 mb-1">Total amount received via M-Pesa today</label>
-            <input type="number" step="0.01" min="0" name="mpesa_amount" id="mpesa-amount" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5" placeholder="0.00"
-                   {% if not has_date_permission %}disabled{% endif %}>
-            <p class="text-xs text-gray-400 mt-2">Cash at hand = <span id="cash-at-hand">0.00</span> (Revenue - M-Pesa)</p>
+            <input type="number" step="0.01" min="0" inputmode="decimal" name="mpesa_amount" id="mpesa-amount" value="{{ mpesa_amount }}" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5" placeholder="0.00">
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Cash Handed Over</h2>
+            <label class="block text-sm text-gray-500 mb-1">Physical cash counted at close</label>
+            <input type="number" step="0.01" min="0" inputmode="decimal" name="cash_counted" id="cash-counted" value="{{ cash_counted }}" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5" placeholder="0.00">
+            <p class="text-sm text-gray-600 mt-3">Expected cash: <span id="expected-cash" class="font-semibold">0.00</span></p>
+            <p class="text-sm mt-1">Difference: <span id="cash-variance" class="font-semibold">—</span></p>
+            <p class="text-xs text-gray-400 mt-2">Expected cash = Revenue − M-Pesa − Expenses</p>
         </div>
         <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Notes to Owner</h2>
             <label class="block text-sm text-gray-500 mb-1">Any message for the owner?</label>
-            <textarea name="notes" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 h-24 resize-none" placeholder="e.g., fridge not cooling well, need more charcoal..."
-                      {% if not has_date_permission %}disabled{% endif %}></textarea>
+            <textarea name="notes" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5 h-24 resize-none" placeholder="e.g., fridge not cooling well, need more charcoal...">{{ notes }}</textarea>
         </div>
     </div>
 
     <div class="flex items-center gap-3">
-        <button type="submit" class="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-6 py-2.5"
-                {% if not has_date_permission %}disabled{% endif %}>Save Day</button>
+        <button type="submit" class="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-6 py-2.5 disabled:opacity-50">Save Day</button>
+        {% if user.is_superuser %}
         <a href="{% url 'home' %}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5">Cancel</a>
+        {% endif %}
     </div>
+    </fieldset>
 </form>
 
 <script>
-function addTransferRow(productId) {
-    const container = document.getElementById('transfer-container-' + productId);
-    const newRow = document.createElement('div');
-    newRow.className = 'transfer-row flex gap-2 mb-1';
-    newRow.innerHTML = `
-        <select name="transfer_to_${productId}" class="transfer-to w-28 bg-gray-50 border border-gray-300 rounded-lg p-2"
-                {% if not has_date_permission %}disabled{% endif %}>
-            <option value="">None</option>
-            {% for b in branches %}
-                {% if b.id != selected.id %}
-                <option value="{{ b.id }}">{{ b.name }}</option>
-                {% endif %}
-            {% endfor %}
-        </select>
-        <input type="number" step="0.01" min="0" name="transfer_quantity_${productId}"
-               value="" class="transfer-quantity w-24 bg-gray-50 border border-gray-300 rounded-lg p-2"
-               {% if not has_date_permission %}disabled{% endif %}>
-    `;
-    container.appendChild(newRow);
-}
-
-function recalc(){
-    let totalRev = 0;
-    document.querySelectorAll('.stock-row').forEach(function(row){
-        const opening = parseFloat(row.dataset.opening) || 0;
-        const selling = parseFloat(row.dataset.selling) || 0;
-        const received = parseFloat(row.querySelector('.received').value) || 0;
-        let totalTransferQty = 0;
-        row.querySelectorAll('.transfer-quantity').forEach(function(input){
-            totalTransferQty += parseFloat(input.value) || 0;
+(function(){
+    const form = document.getElementById('entry-form');
+    const num = el => parseFloat(el && el.value) || 0;
+    function recalc(){
+        let totalRev = 0;
+        document.querySelectorAll('.stock-row').forEach(function(row){
+            const opening = parseFloat(row.dataset.opening) || 0;
+            const selling = parseFloat(row.dataset.selling) || 0;
+            let transferred = 0;
+            row.querySelectorAll('.transfer-quantity').forEach(el => transferred += num(el));
+            let sold = opening + num(row.querySelector('.received')) - transferred
+                - num(row.querySelector('.wastage')) - num(row.querySelector('.closing'));
+            row.classList.toggle('bg-yellow-50', sold < 0);
+            if(sold < 0) sold = 0;
+            const rev = sold * selling;
+            row.querySelector('.sold-cell').textContent = sold.toFixed(2);
+            row.querySelector('.revenue-cell').textContent = rev.toFixed(2);
+            totalRev += rev;
         });
-        const wastage = parseFloat(row.querySelector('.wastage').value) || 0;
-        const closing = parseFloat(row.querySelector('.closing').value) || 0;
-        let sold = opening + received - totalTransferQty - wastage - closing;
-        if(sold < 0) sold = 0;
-        const rev = sold * selling;
-        row.querySelector('.sold-cell').textContent = sold.toFixed(2);
-        row.querySelector('.revenue-cell').textContent = rev.toFixed(2);
-        totalRev += rev;
+        document.getElementById('total-revenue').textContent = totalRev.toFixed(2);
+
+        let totalExp = 0;
+        document.querySelectorAll('.exp-amount').forEach(el => totalExp += num(el));
+        const expected = totalRev - num(document.getElementById('mpesa-amount')) - totalExp;
+        document.getElementById('expected-cash').textContent = expected.toFixed(2);
+        const counted = document.getElementById('cash-counted');
+        const variance = document.getElementById('cash-variance');
+        if(counted.value === ''){
+            variance.textContent = '—';
+            variance.className = 'font-semibold';
+        } else {
+            const diff = num(counted) - expected;
+            variance.textContent = (diff > 0 ? '+' : '') + diff.toFixed(2);
+            variance.className = 'font-semibold ' + (Math.abs(diff) < 0.01 ? 'text-green-600' : 'text-red-600');
+        }
+    }
+    form.addEventListener('input', recalc);
+
+    const transferTmpl = document.getElementById('transfer-row-template').innerHTML;
+    const expenseTmpl = document.getElementById('expense-row-template');
+    form.addEventListener('click', function(e){
+        const t = e.target;
+        if(t.classList.contains('add-transfer')){
+            const pid = t.dataset.pid;
+            const box = form.querySelector('.transfer-container[data-pid="' + pid + '"]');
+            box.insertAdjacentHTML('beforeend', transferTmpl.replaceAll('__PID__', pid));
+        } else if(t.id === 'add-expense'){
+            document.getElementById('expense-body').appendChild(expenseTmpl.content.cloneNode(true));
+        } else if(t.classList.contains('remove-row')){
+            (t.closest('.transfer-row') || t.closest('tr')).remove();
+            recalc();
+        }
     });
-    document.getElementById('total-revenue').textContent = totalRev.toFixed(2);
-    
-    // Calculate cash at hand = Revenue - M-Pesa
-    const mpesaAmount = parseFloat(document.getElementById('mpesa-amount').value) || 0;
-    const cashAtHand = totalRev - mpesaAmount;
-    document.getElementById('cash-at-hand').textContent = cashAtHand.toFixed(2);
-}
 
-document.getElementById('entry-form').addEventListener('input', recalc);
-
-const tmpl = document.getElementById('expense-row-template');
-document.getElementById('add-expense').addEventListener('click', function(){
-    document.getElementById('expense-body').appendChild(tmpl.content.cloneNode(true));
-});
-
-recalc();
+    recalc();
+})();
 </script>
 {% else %}
 <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 text-center text-gray-400">

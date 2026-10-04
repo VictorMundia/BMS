@@ -11,13 +11,36 @@
         <form method="get" class="flex items-end gap-2">
             <div>
                 <label class="block text-xs text-gray-500 mb-1">Date</label>
-                <input type="date" name="date" value="{{ date }}" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5">
+                <input type="date" name="date" value="{{ date|date:'Y-m-d' }}" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5">
             </div>
             <input type="hidden" name="butchery_id" value="{{ branch.id }}">
             <button class="bg-gray-800 hover:bg-gray-900 text-white text-sm rounded-lg px-4 py-2.5">View</button>
         </form>
         <a href="{% url 'home' %}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5 flex items-center">Back to Dashboard</a>
     </div>
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-4 mb-6 flex flex-wrap items-center justify-between gap-3">
+    <p class="text-sm text-gray-700">
+        {% if not summary %}
+            <span class="font-semibold text-yellow-700">Not submitted</span> by staff yet.
+        {% elif summary.is_closed %}
+            <span class="font-semibold text-gray-900">Closed</span>{% if summary.closed_by %} by {{ summary.closed_by.username }}{% endif %}{% if summary.closed_at %} on {{ summary.closed_at|date:"d M Y, H:i" }}{% endif %}. Staff can no longer edit this day.
+        {% else %}
+            <span class="font-semibold text-green-700">Submitted</span>{% if summary.recorded_by %} by {{ summary.recorded_by.username }}{% endif %}.
+        {% endif %}
+    </p>
+    <form method="post" action="{% url 'daily_close' %}">
+        {% csrf_token %}
+        <input type="hidden" name="butchery_id" value="{{ branch.id }}">
+        <input type="hidden" name="date" value="{{ date|date:'Y-m-d' }}">
+        {% if summary.is_closed %}
+        <button name="action" value="reopen" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-4 py-2">Reopen Day</button>
+        {% else %}
+        <button name="action" value="close" class="text-white bg-gray-800 hover:bg-gray-900 font-medium rounded-lg text-sm px-4 py-2">Close Day</button>
+        {% endif %}
+        <a href="{% url 'daily_stock_entry' %}?butchery={{ branch.id }}&date={{ date|date:'Y-m-d' }}" class="ml-2 text-blue-600 hover:underline text-sm">Edit</a>
+    </form>
 </div>
 
 <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
@@ -29,6 +52,7 @@
                     <th class="px-3 py-3">Product</th>
                     <th class="px-3 py-3">Opening</th>
                     <th class="px-3 py-3">Received</th>
+                    <th class="px-3 py-3">Transferred Out</th>
                     <th class="px-3 py-3">Wastage</th>
                     <th class="px-3 py-3">Remaining</th>
                     <th class="px-3 py-3">Sold</th>
@@ -37,24 +61,26 @@
             </thead>
             <tbody>
                 {% for row in rows %}
-                <tr class="border-b">
+                <tr class="border-b {% if row.shortfall %}bg-yellow-50{% endif %}">
                     <td class="px-3 py-2 font-medium text-gray-900">
                         {{ row.product.name }}
                         <span class="text-xs text-gray-400">({{ row.product.get_unit_display }})</span>
+                        {% if row.shortfall %}<span class="block text-xs text-yellow-700">Remaining exceeds available by {{ row.shortfall }}</span>{% endif %}
                     </td>
                     <td class="px-3 py-2">{{ row.opening }}</td>
                     <td class="px-3 py-2">{{ row.received }}</td>
+                    <td class="px-3 py-2">{{ row.transferred_out }}</td>
                     <td class="px-3 py-2 text-red-600">{{ row.wastage }}</td>
                     <td class="px-3 py-2">{{ row.closing }}</td>
                     <td class="px-3 py-2 font-medium">{{ row.sold }}</td>
-                    <td class="px-3 py-2 font-medium text-emerald-600">{{ row.revenue }}</td>
+                    <td class="px-3 py-2 font-medium text-emerald-600">{{ row.revenue|floatformat:2 }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
             <tfoot>
                 <tr class="bg-gray-50 font-semibold text-gray-900">
-                    <td class="px-3 py-3" colspan="6">Total Revenue</td>
-                    <td class="px-3 py-3 text-emerald-600">{{ total_revenue }}</td>
+                    <td class="px-3 py-3" colspan="7">Total Revenue</td>
+                    <td class="px-3 py-3 text-emerald-600">{{ stats.revenue|floatformat:2 }}</td>
                 </tr>
             </tfoot>
         </table>
@@ -63,7 +89,7 @@
 
 <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Incoming Transfers</h2>
-    {% if rows %}
+    {% if transfers_in %}
     <div class="overflow-x-auto">
         <table class="w-full text-sm text-left text-gray-600">
             <thead class="text-xs text-gray-700 uppercase bg-gray-50">
@@ -75,25 +101,19 @@
                 </tr>
             </thead>
             <tbody>
-                {% for row in rows %}
-                {% for transfer in row.transfers_in %}
+                {% for transfer in transfers_in %}
                 <tr class="border-b">
                     <td class="px-3 py-2 font-medium text-gray-900">{{ transfer.source_daily_stock.product.name }}</td>
                     <td class="px-3 py-2">{{ transfer.quantity }}</td>
                     <td class="px-3 py-2 text-blue-600">{{ transfer.source_daily_stock.product.butchery.name }}</td>
                     <td class="px-3 py-2">{{ transfer.source_daily_stock.date }}</td>
                 </tr>
-                {% empty %}
-                {% if forloop.parentloop.last %}
-                <tr><td colspan="4" class="px-3 py-3 text-center text-gray-400">No incoming transfers for this day.</td></tr>
-                {% endif %}
-                {% endfor %}
                 {% endfor %}
             </tbody>
         </table>
     </div>
     {% else %}
-    <p class="text-gray-400">No stock entries for this day.</p>
+    <p class="text-gray-400">No incoming transfers for this day.</p>
     {% endif %}
 </div>
 
@@ -141,6 +161,7 @@
             <thead class="text-xs text-gray-700 uppercase bg-gray-50">
                 <tr>
                     <th class="px-3 py-3">Description</th>
+                    <th class="px-3 py-3">Category</th>
                     <th class="px-3 py-3">Amount</th>
                 </tr>
             </thead>
@@ -148,14 +169,15 @@
                 {% for exp in expenses %}
                 <tr class="border-b">
                     <td class="px-3 py-2">{{ exp.description }}</td>
+                    <td class="px-3 py-2">{{ exp.category.name|default:"-" }}</td>
                     <td class="px-3 py-2 text-red-600">{{ exp.amount }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
             <tfoot>
                 <tr class="bg-gray-50 font-semibold text-gray-900">
-                    <td class="px-3 py-3">Total Expenses</td>
-                    <td class="px-3 py-3 text-red-600">{{ total_expenses }}</td>
+                    <td class="px-3 py-3" colspan="2">Total Expenses</td>
+                    <td class="px-3 py-3 text-red-600">{{ stats.expenses|floatformat:2 }}</td>
                 </tr>
             </tfoot>
         </table>
@@ -167,14 +189,23 @@
 
 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
     <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">M-Pesa Collections</h2>
-        <p class="text-2xl font-bold text-purple-600">{{ mpesa_amount }}</p>
-        <p class="text-sm text-gray-500 mt-2">Cash at hand: {{ total_revenue|floatformat:2 }}</p>
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Cash Check</h2>
+        <dl class="grid grid-cols-2 gap-y-2 text-sm">
+            <dt class="text-gray-500">Revenue</dt><dd class="text-right">{{ stats.revenue|floatformat:2 }}</dd>
+            <dt class="text-gray-500">M-Pesa</dt><dd class="text-right text-purple-600">{{ stats.mpesa_amount|floatformat:2 }}</dd>
+            <dt class="text-gray-500">Expenses</dt><dd class="text-right text-red-600">{{ stats.expenses|floatformat:2 }}</dd>
+            <dt class="font-semibold">Expected cash</dt><dd class="text-right font-semibold">{{ stats.expected_cash|floatformat:2 }}</dd>
+            <dt class="text-gray-500">Cash handed over</dt><dd class="text-right">{% if stats.cash_counted is not None %}{{ stats.cash_counted|floatformat:2 }}{% else %}—{% endif %}</dd>
+            <dt class="font-semibold">Difference</dt>
+            <dd class="text-right font-semibold {% if stats.cash_variance is None %}{% elif stats.cash_variance == 0 %}text-green-600{% else %}text-red-600{% endif %}">
+                {% if stats.cash_variance is not None %}{{ stats.cash_variance|floatformat:2 }}{% else %}—{% endif %}
+            </dd>
+        </dl>
     </div>
     <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
         <h2 class="text-lg font-semibold text-gray-900 mb-4">Notes from Staff</h2>
-        {% if notes %}
-        <p class="text-gray-700">{{ notes }}</p>
+        {% if summary.notes %}
+        <p class="text-gray-700">{{ summary.notes|linebreaksbr }}</p>
         {% else %}
         <p class="text-gray-400">No notes from staff for this day.</p>
         {% endif %}

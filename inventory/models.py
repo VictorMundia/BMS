@@ -9,6 +9,15 @@ def today():
     return localdate()
 
 
+def buying_price_on(product, date):
+    """Slaughterhouse price recorded for `date`, else the latest one before it, else None."""
+    record = (
+        BuyingPrice.objects.filter(product=product, date__lte=date)
+        .order_by('-date').values_list('buying_price_per_kg', flat=True).first()
+    )
+    return record
+
+
 class MeatCategory(models.Model):
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
@@ -89,8 +98,7 @@ class StockMovement(models.Model):
 class DailyStock(models.Model):
     """One row per product per branch per day.
 
-    sold = opening + received - wastage - closing
-    Revenue/profit are derived from the product's prices.
+    sold = opening + received - transferred out - wastage - closing
     """
     product = models.ForeignKey(MeatProduct, on_delete=models.CASCADE, related_name='daily_stocks')
     date = models.DateField(default=today)
@@ -98,6 +106,9 @@ class DailyStock(models.Model):
     received = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     closing_stock = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     wastage = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # Prices at the time of entry, so later price changes don't rewrite history.
+    buying_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    selling_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     recorded_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name='daily_stocks'
     )
@@ -108,24 +119,57 @@ class DailyStock(models.Model):
         ordering = ['-date']
 
     @property
+    def transferred_out(self):
+        return sum((t.quantity for t in self.transfers_out.all()), Decimal('0'))
+
+    @property
+    def available(self):
+        return self.opening_stock + self.received - self.transferred_out - self.wastage
+
+    @property
     def sold(self):
-        """Sold = opening + received - wastage - closing"""
-        return self.opening_stock + self.received - self.wastage - self.closing_stock
+        qty = self.available - self.closing_stock
+        return qty if qty > 0 else Decimal('0')
+
+    @property
+    def shortfall(self):
+        """Stock counted above what was available; indicates a counting error."""
+        qty = self.closing_stock - self.available
+        return qty if qty > 0 else Decimal('0')
+
+    @property
+    def unit_selling_price(self):
+        return self.selling_price if self.selling_price is not None else self.product.selling_price
+
+    @property
+    def unit_buying_price(self):
+        recorded = buying_price_on(self.product, self.date)
+        if recorded is not None:
+            return recorded
+        return self.buying_price if self.buying_price is not None else self.product.buying_price
 
     @property
     def revenue(self):
-        """Revenue = sold * selling_price"""
-        return self.sold * self.product.selling_price
+        return self.sold * self.unit_selling_price
 
     @property
     def cost_of_sales(self):
-        """COGS = sold * buying_price"""
-        return self.sold * self.product.buying_price
+        return self.sold * self.unit_buying_price
+
+    @property
+    def gross_profit(self):
+        return self.revenue - self.cost_of_sales
+
+    @property
+    def wastage_cost(self):
+        return self.wastage * self.unit_buying_price
 
     @property
     def closing_value(self):
-        """Closing value = closing_stock * buying_price"""
-        return self.closing_stock * self.product.buying_price
+        return self.closing_stock * self.unit_buying_price
+
+    def __str__(self):
+        return f"{self.product.name} - {self.date}"
 
 
 # ---------------------------------------------------------------------------
@@ -159,10 +203,19 @@ class DailyBranchSummary(models.Model):
     butchery = models.ForeignKey(Butchery, on_delete=models.CASCADE, related_name='daily_summaries')
     date = models.DateField(default=today)
     mpesa_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cash_counted = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Physical cash handed over at close of day",
+    )
     notes = models.TextField(blank=True, help_text="Staff notes to owner")
     recorded_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name='daily_summaries'
     )
+    is_closed = models.BooleanField(default=False)
+    closed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='closed_days'
+    )
+    closed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ('butchery', 'date')

@@ -3,17 +3,20 @@ from collections import defaultdict
 from datetime import timedelta, datetime, time
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.forms import AuthenticationForm
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import F, Sum, Q, DecimalField, ExpressionWrapper
-from django.http import HttpResponse, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
-from django.utils.timezone import now, localdate
+from django.utils.timezone import now, localdate, localtime
+from django.views.decorators.http import require_POST
 
 from .forms import (
     StockMovementForm, ExpenseForm, StaffCreateForm, StockTransferForm,
@@ -48,22 +51,32 @@ def _paginate(request, queryset, per_page=20):
     return paginator.get_page(request.GET.get('page'))
 
 
-def _to_decimal(value):
-    try:
-        if value in (None, ''):
-            return Decimal('0')
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError, TypeError):
+MAX_AMOUNT = Decimal('99999999.99')
+
+
+def _parse_amount(value):
+    """Parse a non-negative amount. Blank means 0; invalid or negative returns None."""
+    if value is None or str(value).strip() == '':
         return Decimal('0')
+    try:
+        amount = Decimal(str(value).strip())
+    except InvalidOperation:
+        return None
+    if not amount.is_finite() or amount < 0 or amount > MAX_AMOUNT:
+        return None
+    return amount.quantize(Decimal('0.01'))
+
+
+def _low_stock_qs():
+    return MeatProduct.objects.filter(current_stock__lte=F('minimum_stock'))
 
 
 def _business_date():
-    """Returns the current business day (day rolls over at 1am instead of midnight)."""
-    current_time = now().time()
-    if current_time < time(1, 0):
-        # Before 1am, consider it as the previous business day
-        return localdate() - timedelta(days=1)
-    return localdate()
+    """Current business day; entries before BUSINESS_DAY_CUTOFF_HOUR count for the previous day."""
+    current = localtime()
+    if current.hour < settings.BUSINESS_DAY_CUTOFF_HOUR:
+        return current.date() - timedelta(days=1)
+    return current.date()
 
 
 def _opening_for(product, date):
@@ -77,10 +90,151 @@ def _opening_for(product, date):
     return Decimal('0')
 
 
+def _carry_forward(product, saved_row):
+    """Push a day's closing stock into later days' opening stock and sync current stock."""
+    prev_closing = saved_row.closing_stock
+    for row in DailyStock.objects.filter(product=product, date__gt=saved_row.date).order_by('date'):
+        if row.opening_stock != prev_closing:
+            row.opening_stock = prev_closing
+            row.save(update_fields=['opening_stock'])
+        prev_closing = row.closing_stock
+    MeatProduct.objects.filter(pk=product.pk).update(current_stock=prev_closing)
+
+
+def _locked_branch(user):
+    """Branch a non-owner is assigned to, or None."""
+    if user.is_superuser:
+        return None
+    staff = getattr(user, 'staff_profile', None)
+    return staff.butchery if staff else None
+
+
+def _has_date_permission(user, butchery, date):
+    return DatePermission.objects.filter(
+        user=user, butchery=butchery, start_date__lte=date, end_date__gte=date, is_active=True,
+    ).exists()
+
+
+def _edit_block_reason(user, butchery, date, summary):
+    """Return why `user` may not edit this branch/day, or '' if they may."""
+    business_day = _business_date()
+    if date > business_day:
+        return 'You cannot record stock for a future date.'
+    if user.is_superuser or _has_date_permission(user, butchery, date):
+        return ''
+    if summary and summary.is_closed:
+        return 'This day has been closed by the owner and can no longer be edited.'
+    if date != business_day:
+        return 'You can only edit data for today. Contact the admin to make changes to past dates.'
+    return ''
+
+
+def _parse_expense_rows(post, categories):
+    ids = post.getlist('exp_id')
+    amounts = post.getlist('exp_amount')
+    cats = post.getlist('exp_category')
+    rows, errors = [], []
+    for i, desc in enumerate(post.getlist('exp_description')):
+        desc = desc.strip()
+        raw_amount = amounts[i] if i < len(amounts) else ''
+        raw_id = ids[i] if i < len(ids) else ''
+        raw_cat = cats[i] if i < len(cats) else ''
+        amount = _parse_amount(raw_amount)
+        if not desc and amount == 0:
+            continue
+        if not desc:
+            errors.append('Each expense needs a description.')
+        elif not amount:
+            errors.append(f'Expense "{desc}": enter an amount greater than zero.')
+        rows.append({
+            'id': int(raw_id) if raw_id.isdigit() else None,
+            'description': desc,
+            'amount': raw_amount,
+            'amount_value': amount,
+            'category_id': raw_cat,
+            'category': categories.get(int(raw_cat)) if raw_cat.isdigit() else None,
+        })
+    return rows, errors
+
+
+def _parse_transfer_rows(post, product, branch_ids):
+    ids = post.getlist(f'transfer_id_{product.id}')
+    targets = post.getlist(f'transfer_to_{product.id}')
+    quantities = post.getlist(f'transfer_quantity_{product.id}')
+    rows, errors = [], []
+    for i, target in enumerate(targets):
+        target = target.strip()
+        raw_qty = quantities[i] if i < len(quantities) else ''
+        raw_id = ids[i] if i < len(ids) else ''
+        if not target and not raw_qty.strip():
+            continue
+        qty = _parse_amount(raw_qty)
+        if not target.isdigit() or int(target) not in branch_ids:
+            errors.append(f'{product.name}: choose the branch the transfer went to.')
+        elif not qty:
+            errors.append(f'{product.name}: enter a transfer quantity greater than zero.')
+        rows.append({
+            'id': int(raw_id) if raw_id.isdigit() else None,
+            'to_id': target,
+            'quantity': raw_qty,
+            'quantity_value': qty,
+        })
+    return rows, errors
+
+
+def _sync_rows(existing, rows, update, create):
+    """Update rows whose id is in `existing`, create the rest, delete existing rows not submitted."""
+    kept = set()
+    for row in rows:
+        obj = existing.get(row['id'])
+        if obj:
+            update(obj, row)
+            kept.add(obj.pk)
+        else:
+            create(row)
+    for pk, obj in existing.items():
+        if pk not in kept:
+            obj.delete()
+
+
+def _save_expenses(butchery, date, rows, user, replace):
+    existing = {e.pk: e for e in Expense.objects.filter(butchery=butchery, date=date)} if replace else {}
+
+    def update(exp, row):
+        exp.description = row['description']
+        exp.amount = row['amount_value']
+        exp.category = row['category']
+        exp.save(update_fields=['description', 'amount', 'category'])
+
+    def create(row):
+        Expense.objects.create(
+            butchery=butchery, category=row['category'], amount=row['amount_value'],
+            description=row['description'], date=date, recorded_by=user,
+        )
+    _sync_rows(existing, rows, update, create)
+
+
+def _save_transfers(daily_stock, rows, replace):
+    existing = {t.pk: t for t in daily_stock.transfers_out.all()} if replace else {}
+
+    def update(transfer, row):
+        transfer.to_butchery_id = int(row['to_id'])
+        transfer.quantity = row['quantity_value']
+        transfer.save(update_fields=['to_butchery', 'quantity'])
+
+    def create(row):
+        DailyTransfer.objects.create(
+            source_daily_stock=daily_stock, to_butchery_id=int(row['to_id']),
+            quantity=row['quantity_value'],
+        )
+    _sync_rows(existing, rows, update, create)
+
+
 def _branch_day_stats(butchery, date):
-    rows = DailyStock.objects.filter(
-        product__butchery=butchery, date=date
-    ).select_related('product')
+    rows = list(
+        DailyStock.objects.filter(product__butchery=butchery, date=date)
+        .select_related('product').prefetch_related('transfers_out')
+    )
     revenue = sum((r.revenue for r in rows), Decimal('0.00'))
     cogs = sum((r.cost_of_sales for r in rows), Decimal('0.00'))
     stock_value = sum((r.closing_value for r in rows), Decimal('0.00'))
@@ -89,6 +243,8 @@ def _branch_day_stats(butchery, date):
     summary = DailyBranchSummary.objects.filter(butchery=butchery, date=date).first()
     mpesa = summary.mpesa_amount if summary else Decimal('0.00')
     gross = revenue - cogs
+    expected_cash = revenue - mpesa - expenses
+    cash_counted = summary.cash_counted if summary else None
     return {
         'butchery': butchery,
         'revenue': revenue,
@@ -97,22 +253,27 @@ def _branch_day_stats(butchery, date):
         'expenses': expenses,
         'net_profit': gross - expenses,
         'stock_value': stock_value,
-        'entries': rows.count(),
+        'entries': len(rows),
         'mpesa_amount': mpesa,
-        'cash_at_hand': revenue - mpesa,
+        'expected_cash': expected_cash,
+        'cash_counted': cash_counted,
+        'cash_variance': (cash_counted - expected_cash) if cash_counted is not None else None,
+        'submitted': summary is not None,
+        'is_closed': bool(summary and summary.is_closed),
     }
 
 
 def _dashboard_context(date, branch_id=None):
     if branch_id:
-        branch = Butchery.objects.filter(pk=branch_id).first()
+        branch = Butchery.objects.filter(pk=branch_id).first() if str(branch_id).isdigit() else None
         per_branch = [_branch_day_stats(branch, date)] if branch else []
     else:
         per_branch = [_branch_day_stats(b, date) for b in Butchery.objects.all()]
-    keys = ['revenue', 'cogs', 'gross_profit', 'expenses', 'net_profit', 'stock_value', 'mpesa_amount']
+    keys = ['revenue', 'cogs', 'gross_profit', 'expenses', 'net_profit', 'stock_value', 'mpesa_amount', 'expected_cash']
     totals = {k: sum((b[k] for b in per_branch), Decimal('0.00')) for k in keys}
-    # Calculate cash_at_hand as total revenue minus total M-Pesa
-    totals['cash_at_hand'] = totals['revenue'] - totals['mpesa_amount']
+    totals['cash_variance'] = sum(
+        (b['cash_variance'] for b in per_branch if b['cash_variance'] is not None), Decimal('0.00')
+    )
     return {'date': date, 'per_branch': per_branch, 'totals': totals, 'selected_branch_id': branch_id}
 
 
@@ -149,7 +310,7 @@ def home_view(request):
     ctx = _dashboard_context(date, branch_id)
     ctx.update({
         'recent_activities': StockMovement.objects.select_related('product')[:8],
-        'low_stock_count': sum(1 for p in MeatProduct.objects.all() if p.is_low_stock()),
+        'low_stock_count': _low_stock_qs().count(),
         'date_str': date.isoformat(),
         'is_today': date == localdate(),
         'pending_transfers': StockTransfer.objects.filter(status='PENDING').count(),
@@ -169,6 +330,7 @@ def dashboard_data(request):
         'totals': {k: float(v) for k, v in ctx['totals'].items()},
         'per_branch': [
             {
+                'id': b['butchery'].id,
                 'name': b['butchery'].name,
                 'revenue': float(b['revenue']),
                 'gross_profit': float(b['gross_profit']),
@@ -177,7 +339,10 @@ def dashboard_data(request):
                 'stock_value': float(b['stock_value']),
                 'entries': b['entries'],
                 'mpesa_amount': float(b['mpesa_amount']),
-                'cash_at_hand': float(b['cash_at_hand']),
+                'expected_cash': float(b['expected_cash']),
+                'cash_variance': None if b['cash_variance'] is None else float(b['cash_variance']),
+                'submitted': b['submitted'],
+                'is_closed': b['is_closed'],
             }
             for b in ctx['per_branch']
         ],
@@ -214,236 +379,307 @@ def stock_movement(request):
     return render(request, 'stock_movement.html', {'form': form})
 
 
-@login_required
-def daily_stock_entry(request):
-    """Butcher records received + remaining stock and the day's expenses."""
-    branches = Butchery.objects.all()
-    locked_branch = None
-    
-    # Lock branch for non-superusers based on their staff assignment
-    if not request.user.is_superuser:
-        try:
-            staff = request.user.staff_profile
-            locked_branch = staff.butchery
-        except Staff.DoesNotExist:
-            # If no staff assignment, allow all branches (fallback)
-            pass
-
-    if request.method == 'POST':
-        try:
-            butchery_id = request.POST.get('butchery')
-            if not butchery_id:
-                messages.error(request, 'Branch selection is required.')
-                return redirect('daily_stock_entry')
-            
-            butchery = get_object_or_404(Butchery, pk=butchery_id)
-            post_date = _parse_date(request.POST.get('date')) or _business_date()
-            
-            # Date validation: non-superusers can only edit today's data unless they have permission
-            if not request.user.is_superuser and post_date != _business_date():
-                # Check if user has permission for this date and butchery (using date ranges)
-                try:
-                    has_permission = DatePermission.objects.filter(
-                        user=request.user,
-                        butchery=butchery,
-                        start_date__lte=post_date,
-                        end_date__gte=post_date,
-                        is_active=True
-                    ).exists()
-                except Exception as e:
-                    # If permission check fails, deny access by default
-                    has_permission = False
-                
-                if not has_permission:
-                    messages.error(request, 'You can only edit data for today. Past days are read-only. Contact the admin to make changes to past dates.')
-                    return redirect(f"{reverse('daily_stock_readonly')}?butchery_id={butchery.id}&date={post_date}")
-        except Exception as e:
-            messages.error(request, f'Error processing request: {str(e)}')
-            return redirect('daily_stock_entry')
-        
-        try:
-            with transaction.atomic():
-                for product in butchery.products.all():
-                    received = _to_decimal(request.POST.get(f'received_{product.id}'))
-                    closing = _to_decimal(request.POST.get(f'closing_{product.id}'))
-                    wastage = _to_decimal(request.POST.get(f'wastage_{product.id}'))
-                    opening = _opening_for(product, post_date)
-                    
-                    # Handle multiple transfers
-                    transfer_to_ids = request.POST.getlist(f'transfer_to_{product.id}')
-                    transfer_quantities = request.POST.getlist(f'transfer_quantity_{product.id}')
-                    
-                    total_transferred = Decimal('0')
-                    for transfer_to_id, transfer_quantity in zip(transfer_to_ids, transfer_quantities):
-                        transfer_to_id = transfer_to_id.strip()
-                        transfer_quantity = _to_decimal(transfer_quantity)
-                        
-                        if transfer_to_id and transfer_quantity > 0:
-                            transfer_to = get_object_or_404(Butchery, pk=transfer_to_id)
-                            
-                            # Validate that source has enough stock
-                            if opening + received < total_transferred + transfer_quantity:
-                                messages.error(request, f'Not enough stock for {product.name} to transfer {transfer_quantity} to {transfer_to.name}')
-                                return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
-                            
-                            total_transferred += transfer_quantity
-                            messages.success(request, f'Transferred {transfer_quantity} {product.name} to {transfer_to.name}')
-                    
-                    DailyStock.objects.update_or_create(
-                        product=product, date=post_date,
-                        defaults={
-                            'opening_stock': opening,
-                            'received': received,
-                            'closing_stock': closing,
-                            'wastage': wastage,
-                            'recorded_by': request.user,
-                        },
-                    )
-                    
-                    # Create DailyTransfer records
-                    daily_stock = DailyStock.objects.get(product=product, date=post_date)
-                    for transfer_to_id, transfer_quantity in zip(transfer_to_ids, transfer_quantities):
-                        transfer_to_id = transfer_to_id.strip()
-                        transfer_quantity = _to_decimal(transfer_quantity)
-                        
-                        if transfer_to_id and transfer_quantity > 0:
-                            transfer_to = get_object_or_404(Butchery, pk=transfer_to_id)
-                            DailyTransfer.objects.create(
-                                source_daily_stock=daily_stock,
-                                to_butchery=transfer_to,
-                                quantity=transfer_quantity,
-                            )
-                    
-                    MeatProduct.objects.filter(pk=product.pk).update(current_stock=closing)
-                
-                for amount, desc in zip(
-                    request.POST.getlist('exp_amount'),
-                    request.POST.getlist('exp_description'),
-                ):
-                    amt = _to_decimal(amount)
-                    if desc and amt > 0:
-                        Expense.objects.create(
-                            butchery=butchery, amount=amt,
-                            description=desc, date=post_date, recorded_by=request.user,
-                        )
-                mpesa_amt = _to_decimal(request.POST.get('mpesa_amount') or 0)
-                notes = request.POST.get('notes', '').strip()
-                DailyBranchSummary.objects.update_or_create(
-                    butchery=butchery, date=post_date,
-                    defaults={'mpesa_amount': mpesa_amt, 'notes': notes, 'recorded_by': request.user},
-                )
-                log_action(
-                    request.user, 'DAILY_STOCK', 'DailyStock', 0,
-                    f"Daily entry for {butchery.name} on {post_date}", request,
-                )
-        except Exception as e:
-            messages.error(request, f'Error saving data: {str(e)}')
-            return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
-        
-        messages.success(request, 'Daily stock and expenses saved successfully.')
-        return redirect(f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}")
-
-    date = _parse_date(request.GET.get('date')) or _business_date()
-    selected = (
-        locked_branch
-        or branches.filter(pk=request.GET.get('butchery')).first()
-        or branches.first()
-    )
-    
-    # Check if user has permission for this date and butchery (for non-superusers on past dates)
-    has_date_permission = False
-    if not request.user.is_superuser and date != _business_date() and selected:
-        has_date_permission = DatePermission.objects.filter(
-            user=request.user,
-            butchery=selected,
-            start_date__lte=date,
-            end_date__gte=date,
-            is_active=True
-        ).exists()
-    elif request.user.is_superuser:
-        has_date_permission = True
-    elif date == _business_date():
-        has_date_permission = True
-    rows = []
+def _entry_context(user, branches, selected, locked, date, posted=None, posted_expenses=None, posted_transfers=None):
+    """Build the daily entry form context, from saved data or from a rejected submission."""
+    summary = None
+    rows, expenses = [], []
     if selected:
+        summary = (
+            DailyBranchSummary.objects.select_related('recorded_by', 'closed_by')
+            .filter(butchery=selected, date=date).first()
+        )
+        saved = {
+            d.product_id: d for d in DailyStock.objects.filter(product__butchery=selected, date=date)
+            .prefetch_related('transfers_out')
+        }
+        incoming = DailyTransfer.objects.filter(
+            to_butchery=selected, source_daily_stock__date=date,
+        ).select_related('source_daily_stock__product__butchery')
+        incoming_by_name = {}
+        for t in incoming:
+            incoming_by_name.setdefault(t.source_daily_stock.product.name, []).append(t)
+
         for product in selected.products.select_related('category'):
-            existing = DailyStock.objects.filter(product=product, date=date).first()
-            row = {
+            ds = saved.get(product.id)
+            if posted is not None:
+                values = {f: posted.get(f'{f}_{product.id}', '') for f in ('received', 'wastage', 'closing')}
+                transfers = posted_transfers.get(product.id, [])
+            else:
+                values = {
+                    'received': ds.received if ds else '',
+                    'wastage': ds.wastage if ds else '',
+                    'closing': ds.closing_stock if ds else '',
+                }
+                transfers = [
+                    {'id': t.pk, 'to_id': str(t.to_butchery_id), 'quantity': t.quantity}
+                    for t in (ds.transfers_out.all() if ds else [])
+                ]
+            rows.append({
                 'product': product,
                 'opening': _opening_for(product, date),
-                'received': existing.received if existing else '',
-                'closing': existing.closing_stock if existing else '',
-                'wastage': existing.wastage if existing else '',
-            }
-            if existing:
-                row['transfers_out'] = existing.transfers_out.all()
-                row['transfers_in'] = selected.daily_transfers_in.filter(
-                    source_daily_stock__product=product,
-                    source_daily_stock__date=date
-                ).select_related('source_daily_stock__product__butchery')
-            else:
-                row['transfers_out'] = []
-                row['transfers_in'] = []
-            rows.append(row)
-    summary = DailyBranchSummary.objects.filter(butchery=selected, date=date).first()
-    context = {
+                'selling_price': ds.unit_selling_price if ds else product.selling_price,
+                'transfers': transfers,
+                'transfers_in': incoming_by_name.get(product.name, []),
+                **values,
+            })
+        if posted_expenses is not None:
+            expenses = posted_expenses
+        else:
+            expenses = [
+                {'id': e.pk, 'description': e.description, 'amount': e.amount,
+                 'category_id': str(e.category_id or '')}
+                for e in Expense.objects.filter(butchery=selected, date=date).order_by('pk')
+            ]
+
+    if posted is not None:
+        mpesa, cash_counted, notes = (
+            posted.get('mpesa_amount', ''), posted.get('cash_counted', ''), posted.get('notes', '')
+        )
+    else:
+        mpesa = summary.mpesa_amount if summary else ''
+        cash_counted = summary.cash_counted if summary and summary.cash_counted is not None else ''
+        notes = summary.notes if summary else ''
+
+    block_reason = _edit_block_reason(user, selected, date, summary) if selected else ''
+    return {
         'branches': branches,
-        'locked_branch': locked_branch,
+        'other_branches': [b for b in branches if not selected or b.id != selected.id],
+        'locked_branch': locked,
         'selected': selected,
         'rows': rows,
+        'expenses': expenses,
+        'categories': ExpenseCategory.objects.all(),
         'date': date.isoformat(),
         'today': _business_date().isoformat(),
-        'has_date_permission': has_date_permission,
-        'mpesa_amount': summary.mpesa_amount if summary else '',
-        'notes': summary.notes if summary else '',
+        'mpesa_amount': mpesa,
+        'cash_counted': cash_counted,
+        'notes': notes,
+        'summary': summary,
+        'can_edit': not block_reason,
+        'block_reason': block_reason,
     }
-    return render(request, 'daily_stock_entry.html', context)
+
+
+@login_required
+def daily_stock_entry(request):
+    """Butcher records received + remaining stock, transfers and the day's expenses."""
+    branches = list(Butchery.objects.all())
+    locked = _locked_branch(request.user)
+
+    if request.method == 'POST':
+        if locked:
+            butchery = locked
+        else:
+            raw_id = request.POST.get('butchery', '')
+            butchery = Butchery.objects.filter(pk=raw_id).first() if raw_id.isdigit() else None
+        if butchery is None:
+            raise Http404('Branch not found')
+        post_date = _parse_date(request.POST.get('date')) or _business_date()
+        redirect_url = f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={post_date}"
+
+        summary = DailyBranchSummary.objects.filter(butchery=butchery, date=post_date).first()
+        block_reason = _edit_block_reason(request.user, butchery, post_date, summary)
+        if block_reason:
+            messages.error(request, block_reason)
+            return redirect(redirect_url)
+
+        errors = []
+        products = list(butchery.products.all())
+        other_ids = {b.id for b in branches if b.id != butchery.id}
+        quantities, transfers = {}, {}
+        for product in products:
+            values = {
+                f: _parse_amount(request.POST.get(f'{f}_{product.id}'))
+                for f in ('received', 'wastage', 'closing')
+            }
+            if None in values.values():
+                errors.append(f'{product.name}: quantities must be zero or a positive number.')
+            quantities[product.pk] = values
+            rows, transfer_errors = _parse_transfer_rows(request.POST, product, other_ids)
+            errors.extend(transfer_errors)
+            transfers[product.pk] = rows
+            if None not in values.values() and not transfer_errors:
+                total_out = sum((r['quantity_value'] for r in rows), Decimal('0'))
+                if total_out > _opening_for(product, post_date) + values['received']:
+                    errors.append(f'{product.name}: transfers are more than the stock available.')
+
+        categories = {c.pk: c for c in ExpenseCategory.objects.all()}
+        expenses, expense_errors = _parse_expense_rows(request.POST, categories)
+        errors.extend(expense_errors)
+
+        mpesa = _parse_amount(request.POST.get('mpesa_amount'))
+        if mpesa is None:
+            errors.append('M-Pesa amount must be zero or a positive number.')
+        raw_cash = request.POST.get('cash_counted', '').strip()
+        cash_counted = _parse_amount(raw_cash) if raw_cash else None
+        if raw_cash and cash_counted is None:
+            errors.append('Cash handed over must be zero or a positive number.')
+
+        if errors:
+            for error in errors:
+                messages.error(request, error)
+            ctx = _entry_context(
+                request.user, branches, butchery, locked, post_date,
+                request.POST, expenses, transfers,
+            )
+            return render(request, 'daily_stock_entry.html', ctx, status=400)
+
+        # Old open browser tabs don't send row ids, so only append for them.
+        replace = request.POST.get('form_version') == '2'
+        shortfalls = []
+        with transaction.atomic():
+            for product in products:
+                q = quantities[product.pk]
+                defaults = {
+                    'opening_stock': _opening_for(product, post_date),
+                    'received': q['received'],
+                    'closing_stock': q['closing'],
+                    'wastage': q['wastage'],
+                    'recorded_by': request.user,
+                }
+                existing = DailyStock.objects.filter(product=product, date=post_date).first()
+                # Keep the original prices when correcting a past day.
+                if existing is None or existing.selling_price is None or post_date == _business_date():
+                    defaults['buying_price'] = product.buying_price
+                    defaults['selling_price'] = product.selling_price
+                row, _ = DailyStock.objects.update_or_create(
+                    product=product, date=post_date, defaults=defaults,
+                )
+                _save_transfers(row, transfers[product.pk], replace)
+                if row.shortfall > 0:
+                    shortfalls.append(product.name)
+                _carry_forward(product, row)
+
+            _save_expenses(butchery, post_date, expenses, request.user, replace)
+            summary, _ = DailyBranchSummary.objects.update_or_create(
+                butchery=butchery, date=post_date,
+                defaults={
+                    'mpesa_amount': mpesa,
+                    'cash_counted': cash_counted,
+                    'notes': request.POST.get('notes', '').strip(),
+                    'recorded_by': request.user,
+                },
+            )
+            log_action(
+                request.user, 'DAILY_STOCK', 'DailyBranchSummary', summary.pk,
+                f"Daily entry for {butchery.name} on {post_date}", request,
+            )
+
+        messages.success(request, 'Daily stock and expenses saved successfully.')
+        if shortfalls:
+            messages.warning(
+                request,
+                'Remaining stock is more than what was available for: '
+                + ', '.join(shortfalls) + '. Please re-check the counts.',
+            )
+        return redirect(redirect_url)
+
+    date = _parse_date(request.GET.get('date')) or _business_date()
+    selected = locked
+    if selected is None:
+        raw_id = request.GET.get('butchery', '')
+        selected = next((b for b in branches if str(b.id) == raw_id), None) or (branches[0] if branches else None)
+    ctx = _entry_context(request.user, branches, selected, locked, date)
+    return render(request, 'daily_stock_entry.html', ctx)
 
 
 @login_required
 def daily_stock_readonly(request):
     """Read-only view of daily entry for a specific branch (owner view)."""
-    date = _parse_date(request.GET.get('date')) or localdate()
-    branch_id = request.GET.get('butchery_id')
+    date = _parse_date(request.GET.get('date')) or _business_date()
+    branch_id = request.GET.get('butchery_id', '')
+    if not branch_id.isdigit():
+        raise Http404('Branch not found')
     branch = get_object_or_404(Butchery, pk=branch_id)
-    
+
+    saved = {
+        d.product_id: d for d in DailyStock.objects.filter(product__butchery=branch, date=date)
+        .prefetch_related('transfers_out__to_butchery')
+    }
+    zero = Decimal('0')
     rows = []
     for product in branch.products.select_related('category'):
-        existing = DailyStock.objects.filter(product=product, date=date).first()
-        row = {
+        ds = saved.get(product.id)
+        rows.append({
             'product': product,
-            'opening': _opening_for(product, date),
-            'received': existing.received if existing else Decimal('0'),
-            'closing': existing.closing_stock if existing else Decimal('0'),
-            'wastage': existing.wastage if existing else Decimal('0'),
-            'sold': existing.sold if existing else Decimal('0'),
-            'revenue': existing.revenue if existing else Decimal('0'),
-        }
-        if existing:
-            row['transfers_out'] = existing.transfers_out.select_related('to_butchery')
-            row['transfers_in'] = branch.daily_transfers_in.filter(
-                source_daily_stock__product=product,
-                source_daily_stock__date=date
-            ).select_related('source_daily_stock__product__butchery')
-        else:
-            row['transfers_out'] = []
-            row['transfers_in'] = []
-        rows.append(row)
-    
-    expenses = Expense.objects.filter(butchery=branch, date=date)
-    summary = DailyBranchSummary.objects.filter(butchery=branch, date=date).first()
-    
+            'opening': ds.opening_stock if ds else _opening_for(product, date),
+            'received': ds.received if ds else zero,
+            'transferred_out': ds.transferred_out if ds else zero,
+            'closing': ds.closing_stock if ds else zero,
+            'wastage': ds.wastage if ds else zero,
+            'sold': ds.sold if ds else zero,
+            'revenue': ds.revenue if ds else zero,
+            'shortfall': ds.shortfall if ds else zero,
+            'transfers_out': list(ds.transfers_out.all()) if ds else [],
+        })
+
+    summary = (
+        DailyBranchSummary.objects.select_related('recorded_by', 'closed_by')
+        .filter(butchery=branch, date=date).first()
+    )
     context = {
         'branch': branch,
         'date': date,
         'rows': rows,
-        'expenses': expenses,
-        'mpesa_amount': summary.mpesa_amount if summary else Decimal('0'),
-        'notes': summary.notes if summary else '',
-        'total_revenue': sum(r['revenue'] for r in rows),
-        'total_expenses': sum(e.amount for e in expenses),
+        'transfers_in': DailyTransfer.objects.filter(
+            to_butchery=branch, source_daily_stock__date=date,
+        ).select_related('source_daily_stock__product__butchery'),
+        'expenses': Expense.objects.filter(butchery=branch, date=date).select_related('category'),
+        'summary': summary,
+        'stats': _branch_day_stats(branch, date),
     }
     return render(request, 'daily_stock_readonly.html', context)
+
+
+@login_required
+@require_POST
+def daily_close(request):
+    """Owner locks (or unlocks) a branch's day so staff can no longer edit it."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    branch_id = request.POST.get('butchery_id', '')
+    date = _parse_date(request.POST.get('date'))
+    if not branch_id.isdigit() or date is None:
+        return HttpResponseBadRequest('Invalid branch or date')
+    branch = get_object_or_404(Butchery, pk=branch_id)
+    close = request.POST.get('action') == 'close'
+
+    summary, _ = DailyBranchSummary.objects.get_or_create(butchery=branch, date=date)
+    summary.is_closed = close
+    summary.closed_by = request.user if close else None
+    summary.closed_at = now() if close else None
+    summary.save(update_fields=['is_closed', 'closed_by', 'closed_at'])
+    log_action(
+        request.user, 'DAY_CLOSED' if close else 'DAY_REOPENED', 'DailyBranchSummary',
+        summary.pk, f"{branch.name} on {date}", request,
+    )
+    messages.success(request, f"{branch.name} {date} {'closed' if close else 'reopened'}.")
+    return redirect(f"{reverse('daily_stock_readonly')}?butchery_id={branch.id}&date={date}")
+
+
+@login_required
+def audit_log_list(request):
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    qs = AuditLog.objects.select_related('user')
+    q = request.GET.get('q', '').strip()
+    action = request.GET.get('action', '')
+    start_date = _parse_date(request.GET.get('start_date'))
+    end_date = _parse_date(request.GET.get('end_date'))
+    if q:
+        qs = qs.filter(Q(user__username__icontains=q) | Q(description__icontains=q))
+    if action:
+        qs = qs.filter(action=action)
+    if start_date:
+        qs = qs.filter(timestamp__date__gte=start_date)
+    if end_date:
+        qs = qs.filter(timestamp__date__lte=end_date)
+    return render(request, 'audit_log_list.html', {
+        'page_obj': _paginate(request, qs, per_page=50),
+        'actions': AuditLog.objects.order_by('action').values_list('action', flat=True).distinct(),
+        'q': q,
+        'selected_action': action,
+    })
 
 
 @login_required
@@ -538,28 +774,8 @@ def save_buying_prices(request):
     return JsonResponse({'success': True})
 
 
-def _get_buying_price_for_date(product, date):
-    """Get the buying price for a product on a specific date."""
-    # Try to get buying price for the exact date
-    buying_price = BuyingPrice.objects.filter(product=product, date=date).first()
-    if buying_price:
-        return buying_price.buying_price_per_kg
-    
-    # If no exact match, get the most recent previous buying price
-    buying_price = BuyingPrice.objects.filter(
-        product=product,
-        date__lt=date
-    ).order_by('-date').first()
-    
-    if buying_price:
-        return buying_price.buying_price_per_kg
-    
-    # Fall back to product's default buying price
-    return product.buying_price
-
-
 def _compute_profit_loss(butchery_id, start_date, end_date):
-    qs = DailyStock.objects.select_related('product')
+    qs = DailyStock.objects.select_related('product').prefetch_related('transfers_out')
     if start_date:
         qs = qs.filter(date__gte=start_date)
     if end_date:
@@ -570,9 +786,9 @@ def _compute_profit_loss(butchery_id, start_date, end_date):
     prod = {}
     total_revenue = total_cogs = wastage_cost = Decimal('0.00')
     for ds in qs:
-        # Get the actual buying price for this date
-        buying_price = _get_buying_price_for_date(ds.product, ds.date)
-        
+        buying_price = ds.unit_buying_price
+        sold = ds.sold
+        revenue = ds.revenue
         row = prod.setdefault(ds.product.name, {
             'name': ds.product.name,
             'sold': Decimal('0'),
@@ -580,13 +796,12 @@ def _compute_profit_loss(butchery_id, start_date, end_date):
             'cogs': Decimal('0.00'),
             'wastage': Decimal('0'),
         })
-        row['sold'] += ds.sold
-        row['revenue'] += ds.revenue
-        # Calculate COGS using actual buying price
-        row['cogs'] += ds.sold * buying_price
+        row['sold'] += sold
+        row['revenue'] += revenue
+        row['cogs'] += sold * buying_price
         row['wastage'] += ds.wastage
-        total_revenue += ds.revenue
-        total_cogs += ds.sold * buying_price
+        total_revenue += revenue
+        total_cogs += sold * buying_price
         wastage_cost += ds.wastage * buying_price
 
     per_product = list(prod.values())
@@ -623,10 +838,7 @@ def reporting_dashboard(request):
     end = _parse_date(request.GET.get('end_date')) or localdate()
     data = _compute_profit_loss(butchery_id, start, end)
     by_sold = sorted(data['per_product'], key=lambda r: r['sold'], reverse=True)
-    low_stock_products = [
-        p for p in MeatProduct.objects.select_related('category', 'butchery')
-        if p.is_low_stock()
-    ]
+    low_stock_products = list(_low_stock_qs().select_related('category', 'butchery'))
     context = {
         'low_stock_products': low_stock_products,
         'total_stock_value': _total_stock_value(),

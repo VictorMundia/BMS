@@ -2,33 +2,35 @@
 import os
 from pathlib import Path
 
-from decouple import config
+from decouple import Csv, config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-key-in-production-bms-2024')
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', default=True, cast=bool)
+# Production must set SECRET_KEY; the fallback is for local development only.
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-local-dev-only' if DEBUG else '')
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
-# Trusted origins for CSRF (includes the IDE browser-preview proxy port).
-# If the preview opens on a different port, add it here.
-CSRF_TRUSTED_ORIGINS = [
-    'http://127.0.0.1:8000',
-    'http://localhost:8000',
-    'http://127.0.0.1:64897',
-    'http://localhost:64897',
-    'http://127.0.0.1:51560',
-    'http://localhost:51560',
-    'https://bms-app-d4f68461bed5.herokuapp.com',
-]
+CSRF_TRUSTED_ORIGINS = config(
+    'CSRF_TRUSTED_ORIGINS',
+    default='http://127.0.0.1:8000,http://localhost:8000,https://bms-app-d4f68461bed5.herokuapp.com',
+    cast=Csv(),
+)
+
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=3600, cast=int)
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 
 # Application definition
 INSTALLED_APPS = [
+    'jazzmin',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -36,11 +38,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'inventory.apps.InventoryConfig',
-    'jazzmin',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -72,7 +74,7 @@ WSGI_APPLICATION = 'butchery_system.wsgi.application'
 
 
 # Database
-# Use PostgreSQL on Render (when DATABASE_URL is set), otherwise SQLite for local dev
+# PostgreSQL in production (DATABASE_URL), otherwise SQLite for local dev
 import dj_database_url
 DATABASES = {
     'default': dj_database_url.config(
@@ -85,6 +87,11 @@ DATABASES = {
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    # Not the Manifest variant: Jazzmin's CSS references a .map file it doesn't ship.
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
+}
 
 
 # Password validation
@@ -98,13 +105,12 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Internationalization
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Africa/Nairobi'
 USE_I18N = True
 USE_TZ = True
 
-
-# Static files (CSS, JavaScript, Images)
-STATIC_URL = 'static/'
+# Local hour at which a new business day starts (entries before it count for the previous day).
+BUSINESS_DAY_CUTOFF_HOUR = config('BUSINESS_DAY_CUTOFF_HOUR', default=4, cast=int)
 
 # Media files (uploaded receipt images, etc.)
 MEDIA_URL = '/media/'

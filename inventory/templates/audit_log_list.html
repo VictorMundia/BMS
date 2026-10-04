@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block title %}Audit Log - BMS{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-gray-900 mb-6">Audit Log</h1>
+
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+    <form method="get" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+        <input type="text" name="q" value="{{ q }}" placeholder="User or description..."
+               class="lg:col-span-2 bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5">
+        <select name="action" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5">
+            <option value="">All actions</option>
+            {% for a in actions %}
+            <option value="{{ a }}" {% if a == selected_action %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+        </select>
+        <input type="date" name="start_date" value="{{ request.GET.start_date }}" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5">
+        <div class="flex gap-2">
+            <input type="date" name="end_date" value="{{ request.GET.end_date }}" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2.5">
+            <button class="text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-4 py-2.5">Filter</button>
+        </div>
+    </form>
+
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-600">
+            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3">When</th>
+                    <th class="px-4 py-3">User</th>
+                    <th class="px-4 py-3">Action</th>
+                    <th class="px-4 py-3">Details</th>
+                    <th class="px-4 py-3">IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in page_obj %}
+                <tr class="border-b">
+                    <td class="px-4 py-3 whitespace-nowrap">{{ log.timestamp|date:"d M Y, H:i" }}</td>
+                    <td class="px-4 py-3">{{ log.user.username|default:"-" }}</td>
+                    <td class="px-4 py-3 font-medium text-gray-900">{{ log.action }}</td>
+                    <td class="px-4 py-3">{{ log.description }}</td>
+                    <td class="px-4 py-3 text-gray-400">{{ log.ip_address|default:"" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="px-4 py-3 text-center text-gray-400">No activity found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="flex items-center justify-between mt-5 text-sm">
+        <span class="text-gray-600">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        <div class="flex gap-2">
+            {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}&q={{ q|urlencode }}&action={{ selected_action|urlencode }}&start_date={{ request.GET.start_date|urlencode }}&end_date={{ request.GET.end_date|urlencode }}" class="px-3 py-2 border rounded-lg hover:bg-gray-100">Previous</a>
+            {% endif %}
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}&q={{ q|urlencode }}&action={{ selected_action|urlencode }}&start_date={{ request.GET.start_date|urlencode }}&end_date={{ request.GET.end_date|urlencode }}" class="px-3 py-2 border rounded-lg hover:bg-gray-100">Next</a>
+            {% endif %}
+        </div>
+    </nav>
+    {% endif %}
+</div>
+{% endblock %}

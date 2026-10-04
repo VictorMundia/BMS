@@ -9,6 +9,9 @@ urlpatterns = [
     path('daily-stock/', views.daily_stock_entry, name='daily_stock_entry'),
     path('daily-stock/history/', views.daily_stock_history, name='daily_stock_history'),
     path('daily-stock/readonly/', views.daily_stock_readonly, name='daily_stock_readonly'),
+    path('daily-stock/close/', views.daily_close, name='daily_close'),
+    # Audit trail
+    path('audit-log/', views.audit_log_list, name='audit_log_list'),
     # Stock movements
     path('stock-movement/', views.stock_movement, name='stock_movement'),
     path('stock-movements/', views.stock_movement_list, name='stock_movement_list'),

@@ -40,8 +40,8 @@
         <p class="text-xl font-bold text-purple-600" id="kpi-mpesa_amount">{{ totals.mpesa_amount|floatformat:2 }}</p>
     </div>
     <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
-        <p class="text-xs text-gray-500">Cash at Hand</p>
-        <p class="text-xl font-bold text-green-600" id="kpi-cash_at_hand">{{ totals.cash_at_hand|floatformat:2 }}</p>
+        <p class="text-xs text-gray-500">Expected Cash</p>
+        <p class="text-xl font-bold text-green-600" id="kpi-expected_cash">{{ totals.expected_cash|floatformat:2 }}</p>
     </div>
     <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-5">
         <p class="text-xs text-gray-500">Cost of Sales</p>
@@ -75,10 +75,11 @@
             <thead class="text-xs text-gray-700 uppercase bg-gray-50">
                 <tr>
                     <th class="px-4 py-3">Branch</th>
-                    <th class="px-4 py-3">Entries</th>
+                    <th class="px-4 py-3">Status</th>
                     <th class="px-4 py-3">Revenue</th>
                     <th class="px-4 py-3">M-Pesa</th>
-                    <th class="px-4 py-3">Cash at Hand</th>
+                    <th class="px-4 py-3">Expected Cash</th>
+                    <th class="px-4 py-3">Cash Difference</th>
                     <th class="px-4 py-3">Gross Profit</th>
                     <th class="px-4 py-3">Expenses</th>
                     <th class="px-4 py-3">Net Profit</th>
@@ -91,17 +92,20 @@
                     <td class="px-4 py-3 font-medium text-gray-900">
                         <a href="{% url 'daily_stock_readonly' %}?butchery_id={{ b.butchery.id }}&date={{ date_str }}" class="text-blue-600 hover:underline">{{ b.butchery.name }}</a>
                     </td>
-                    <td class="px-4 py-3">{{ b.entries }}</td>
+                    <td class="px-4 py-3">
+                        {% if b.is_closed %}<span class="text-gray-700">Closed</span>{% elif b.submitted %}<span class="text-green-700">Submitted</span>{% else %}<span class="text-yellow-700">Pending</span>{% endif %}
+                    </td>
                     <td class="px-4 py-3">{{ b.revenue|floatformat:2 }}</td>
                     <td class="px-4 py-3 text-purple-600">{{ b.mpesa_amount|floatformat:2 }}</td>
-                    <td class="px-4 py-3 text-green-600">{{ b.cash_at_hand|floatformat:2 }}</td>
+                    <td class="px-4 py-3 text-green-600">{{ b.expected_cash|floatformat:2 }}</td>
+                    <td class="px-4 py-3 {% if b.cash_variance is not None and b.cash_variance != 0 %}text-red-600 font-semibold{% endif %}">{% if b.cash_variance is not None %}{{ b.cash_variance|floatformat:2 }}{% else %}—{% endif %}</td>
                     <td class="px-4 py-3 text-blue-600">{{ b.gross_profit|floatformat:2 }}</td>
                     <td class="px-4 py-3 text-red-600">{{ b.expenses|floatformat:2 }}</td>
                     <td class="px-4 py-3 font-semibold">{{ b.net_profit|floatformat:2 }}</td>
                     <td class="px-4 py-3">{{ b.stock_value|floatformat:2 }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="7" class="px-4 py-3 text-center text-gray-400">No branches yet.</td></tr>
+                <tr><td colspan="10" class="px-4 py-3 text-center text-gray-400">No branches yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -145,14 +149,16 @@
     const badge = document.getElementById('live-badge');
     if(badge){ badge.classList.remove('hidden'); badge.classList.add('inline-flex'); }
     const fmt = n => Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-    const branchId = "{{ selected_branch_id|default:'' }}";
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const readonlyUrl = "{% url 'daily_stock_readonly' %}";
+    const branchId = "{{ selected_branch_id|default:''|escapejs }}";
     async function refresh(){
         try{
             let url = "{% url 'dashboard_data' %}?date={{ date_str }}";
-            if(branchId) url += "&branch_id=" + branchId;
+            if(branchId) url += "&branch_id=" + encodeURIComponent(branchId);
             const r = await fetch(url);
             const d = await r.json();
-            ['stock_value','revenue','mpesa_amount','cash_at_hand','cogs','gross_profit','expenses','net_profit'].forEach(k => {
+            ['stock_value','revenue','mpesa_amount','expected_cash','cogs','gross_profit','expenses','net_profit'].forEach(k => {
                 const el = document.getElementById('kpi-'+k);
                 if(el) el.textContent = fmt(d.totals[k]);
             });
@@ -160,11 +166,12 @@
             if(body && d.per_branch.length){
                 body.innerHTML = d.per_branch.map(b => `
                     <tr class="border-b">
-                        <td class="px-4 py-3 font-medium text-gray-900">${b.name}</td>
-                        <td class="px-4 py-3">${b.entries}</td>
+                        <td class="px-4 py-3 font-medium text-gray-900"><a href="${readonlyUrl}?butchery_id=${b.id}&date={{ date_str }}" class="text-blue-600 hover:underline">${esc(b.name)}</a></td>
+                        <td class="px-4 py-3">${b.is_closed ? '<span class="text-gray-700">Closed</span>' : b.submitted ? '<span class="text-green-700">Submitted</span>' : '<span class="text-yellow-700">Pending</span>'}</td>
                         <td class="px-4 py-3">${fmt(b.revenue)}</td>
                         <td class="px-4 py-3 text-purple-600">${fmt(b.mpesa_amount)}</td>
-                        <td class="px-4 py-3 text-green-600">${fmt(b.cash_at_hand)}</td>
+                        <td class="px-4 py-3 text-green-600">${fmt(b.expected_cash)}</td>
+                        <td class="px-4 py-3 ${b.cash_variance !== null && Math.abs(b.cash_variance) >= 0.01 ? 'text-red-600 font-semibold' : ''}">${b.cash_variance === null ? '—' : fmt(b.cash_variance)}</td>
                         <td class="px-4 py-3 text-blue-600">${fmt(b.gross_profit)}</td>
                         <td class="px-4 py-3 text-red-600">${fmt(b.expenses)}</td>
                         <td class="px-4 py-3 font-semibold">${fmt(b.net_profit)}</td>
