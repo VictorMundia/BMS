@@ -1,4 +1,5 @@
 from decimal import Decimal
+from functools import cached_property
 
 from django.db import models, transaction
 from django.contrib.auth.models import User
@@ -36,6 +37,9 @@ class Butchery(models.Model):
     manager = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='managed_butcheries'
+    )
+    serves_schools = models.BooleanField(
+        default=False, help_text="Shows the School Deliveries section on this branch's daily entry",
     )
 
     class Meta:
@@ -141,6 +145,16 @@ class DailyStock(models.Model):
     def unit_selling_price(self):
         return self.selling_price if self.selling_price is not None else self.product.selling_price
 
+    @cached_property
+    def school_totals(self):
+        """(kg, amount) delivered to schools from this product on this day."""
+        result = SchoolDelivery.objects.filter(product_id=self.product_id, date=self.date).aggregate(
+            qty=models.Sum('quantity'),
+            amount=models.Sum(models.F('quantity') * models.F('unit_price'),
+                              output_field=models.DecimalField(max_digits=14, decimal_places=2)),
+        )
+        return result['qty'] or Decimal('0'), result['amount'] or Decimal('0')
+
     @property
     def unit_buying_price(self):
         recorded = buying_price_on(self.product, self.date)
@@ -150,7 +164,10 @@ class DailyStock(models.Model):
 
     @property
     def revenue(self):
-        return self.sold * self.unit_selling_price
+        """Shop sales at the shop price plus school deliveries at the school price."""
+        school_qty, school_amount = self.school_totals
+        shop_qty = self.sold - school_qty
+        return max(shop_qty, Decimal('0')) * self.unit_selling_price + school_amount
 
     @property
     def cost_of_sales(self):
@@ -331,6 +348,79 @@ class DatePermission(models.Model):
     def covers_date(self, date):
         """Check if this permission covers a specific date."""
         return self.start_date <= date <= self.end_date
+
+
+# ---------------------------------------------------------------------------
+# Schools supplied on credit (paid weekly by cheque)
+# ---------------------------------------------------------------------------
+class School(models.Model):
+    butchery = models.ForeignKey(Butchery, on_delete=models.CASCADE, related_name='schools')
+    name = models.CharField(max_length=200)
+    contact_person = models.CharField(max_length=200, blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class SchoolPrice(models.Model):
+    school = models.ForeignKey(School, on_delete=models.CASCADE, related_name='prices')
+    product = models.ForeignKey(MeatProduct, on_delete=models.CASCADE, related_name='school_prices')
+    price_per_unit = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        unique_together = ('school', 'product')
+
+    def __str__(self):
+        return f"{self.school} - {self.product.name}: {self.price_per_unit}"
+
+
+class SchoolDelivery(models.Model):
+    school = models.ForeignKey(School, on_delete=models.PROTECT, related_name='deliveries')
+    product = models.ForeignKey(MeatProduct, on_delete=models.PROTECT, related_name='school_deliveries')
+    date = models.DateField(default=today)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2)
+    # School price at the time of delivery.
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    recorded_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='school_deliveries'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date', 'school__name']
+        verbose_name_plural = 'School deliveries'
+
+    @property
+    def amount(self):
+        return self.quantity * self.unit_price
+
+    def __str__(self):
+        return f"{self.date} {self.school}: {self.quantity} {self.product.name}"
+
+
+class SchoolPayment(models.Model):
+    school = models.ForeignKey(School, on_delete=models.PROTECT, related_name='payments')
+    week_start = models.DateField(help_text="Monday of the delivery week this cheque pays for")
+    cheque_number = models.CharField(max_length=50)
+    bank = models.CharField(max_length=100, blank=True)
+    cheque_date = models.DateField(default=today)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    notes = models.TextField(blank=True)
+    recorded_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='school_payments'
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-week_start', 'school__name']
+
+    def __str__(self):
+        return f"{self.school} cheque {self.cheque_number} ({self.amount})"
 
 
 # ---------------------------------------------------------------------------

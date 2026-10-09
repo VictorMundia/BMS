@@ -12,6 +12,9 @@ urlpatterns = [
     path('daily-stock/close/', views.daily_close, name='daily_close'),
     # Audit trail
     path('audit-log/', views.audit_log_list, name='audit_log_list'),
+    # Schools (credit customers)
+    path('schools/', views.schools_report, name='schools_report'),
+    path('schools/<int:pk>/statement/', views.school_statement, name='school_statement'),
     # Stock movements
     path('stock-movement/', views.stock_movement, name='stock_movement'),
     path('stock-movements/', views.stock_movement_list, name='stock_movement_list'),

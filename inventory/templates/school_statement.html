@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}Statement - {{ school.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white rounded-lg shadow-sm border border-gray-100 p-8 print:shadow-none print:border-0">
+    <div class="flex justify-between items-start mb-6">
+        <div>
+            <h1 class="text-xl font-bold text-gray-900">{{ school.butchery.name }} Butchery</h1>
+            <p class="text-sm text-gray-500">{{ school.butchery.location }}{% if school.butchery.phone %} · {{ school.butchery.phone }}{% endif %}</p>
+        </div>
+        <div class="text-right">
+            <p class="text-lg font-semibold text-gray-900">Delivery Statement</p>
+            <p class="text-sm text-gray-500">{{ week_start|date:"j M" }} – {{ week_end|date:"j M Y" }}</p>
+        </div>
+    </div>
+
+    <p class="mb-4 text-sm"><span class="text-gray-500">To:</span> <strong>{{ school.name }}</strong>{% if school.contact_person %}, Attn: {{ school.contact_person }}{% endif %}</p>
+
+    <table class="w-full text-sm text-left text-gray-700 mb-6">
+        <thead class="text-xs uppercase bg-gray-50">
+            <tr><th class="px-3 py-2">Date</th><th class="px-3 py-2">Product</th><th class="px-3 py-2 text-right">Kg</th><th class="px-3 py-2 text-right">Price/kg</th><th class="px-3 py-2 text-right">Amount</th></tr>
+        </thead>
+        <tbody>
+            {% for d in deliveries %}
+            <tr class="border-b">
+                <td class="px-3 py-2">{{ d.date|date:"D j M" }}</td>
+                <td class="px-3 py-2">{{ d.product.name }}</td>
+                <td class="px-3 py-2 text-right">{{ d.quantity }}</td>
+                <td class="px-3 py-2 text-right">{{ d.unit_price|floatformat:2 }}</td>
+                <td class="px-3 py-2 text-right">{{ d.amount|floatformat:2 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot class="font-semibold">
+            {% for line in lines %}
+            <tr><td class="px-3 py-1 text-gray-500" colspan="2">{{ line.product }} total</td><td class="px-3 py-1 text-right text-gray-500">{{ line.quantity }} kg</td><td></td><td class="px-3 py-1 text-right text-gray-500">{{ line.amount|floatformat:2 }}</td></tr>
+            {% endfor %}
+            <tr class="border-t text-gray-900"><td class="px-3 py-2" colspan="4">Total for the week</td><td class="px-3 py-2 text-right">{{ total|floatformat:2 }}</td></tr>
+            {% for p in payments %}
+            <tr class="text-green-700"><td class="px-3 py-1" colspan="4">Cheque {{ p.cheque_number }}{% if p.bank %} ({{ p.bank }}){% endif %}, {{ p.cheque_date|date:"j M Y" }}</td><td class="px-3 py-1 text-right">-{{ p.amount|floatformat:2 }}</td></tr>
+            {% endfor %}
+            <tr class="text-gray-900"><td class="px-3 py-2" colspan="4">Balance due</td><td class="px-3 py-2 text-right">{{ balance|floatformat:2 }}</td></tr>
+        </tfoot>
+    </table>
+
+    <div class="grid grid-cols-2 gap-8 text-sm text-gray-600 mt-10">
+        <p>Received by: ______________________</p>
+        <p>Signature &amp; stamp: ________________</p>
+    </div>
+
+    <div class="mt-8 flex gap-3 print:hidden">
+        <button onclick="window.print()" class="text-white bg-gray-800 hover:bg-gray-900 font-medium rounded-lg text-sm px-5 py-2.5">Print</button>
+        <a href="{% url 'schools_report' %}?week={{ week_start|date:'Y-m-d' }}" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-5 py-2.5">Back</a>
+    </div>
+</div>
+{% endblock %}

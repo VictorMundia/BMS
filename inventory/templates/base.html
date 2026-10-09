@@ -10,7 +10,7 @@
 </head>
 <body class="bg-gray-50 min-h-screen">
     {% if user.is_authenticated %}
-    <nav class="bg-white border-b border-gray-200 shadow-sm">
+    <nav class="bg-white border-b border-gray-200 shadow-sm print:hidden">
         <div class="max-w-screen-xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between">
             <a href="{% if user.is_superuser %}{% url 'home' %}{% else %}{% url 'daily_stock_entry' %}{% endif %}" class="flex items-center space-x-2">
                 <svg class="w-7 h-7 text-red-600" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
@@ -34,6 +34,7 @@
                     <li><a href="{% url 'reporting_dashboard' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Reports</a></li>
                     <li><a href="{% url 'profit_loss_report' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">P&amp;L</a></li>
                     <li><a href="{% url 'buying_prices' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Buying Prices</a></li>
+                    <li><a href="{% url 'schools_report' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Schools</a></li>
                     <li><a href="{% url 'audit_log_list' %}" class="block py-2 px-3 text-gray-700 rounded hover:bg-gray-100 md:hover:bg-transparent md:hover:text-red-600">Audit Log</a></li>
                 </ul>
             </div>

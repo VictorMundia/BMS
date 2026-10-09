@@ -24,6 +24,7 @@ from .forms import (
 from .models import (
     MeatProduct, StockMovement, DailyStock, DailyBranchSummary, Butchery,
     Expense, ExpenseCategory, Staff, StockTransfer, AuditLog, DatePermission, BuyingPrice, DailyTransfer,
+    School, SchoolDelivery, SchoolPayment, SchoolPrice,
 )
 from .utils import send_low_stock_alert, log_action
 
@@ -266,6 +267,69 @@ def _save_transfers(daily_stock, rows, replace):
     _sync_rows(existing, rows, update, create)
 
 
+def _school_price_map(butchery):
+    """{school_id: {product_id: price}} for the branch's active schools."""
+    prices = {s.id: {} for s in School.objects.filter(butchery=butchery, is_active=True)}
+    for sp in SchoolPrice.objects.filter(school_id__in=prices):
+        prices[sp.school_id][sp.product_id] = sp.price_per_unit
+    return prices
+
+
+def _parse_delivery_rows(post, price_map, product_names):
+    ids = post.getlist('delivery_id')
+    products = post.getlist('delivery_product')
+    quantities = post.getlist('delivery_quantity')
+    rows, errors = [], []
+    for i, school in enumerate(post.getlist('delivery_school')):
+        school = school.strip()
+        product = products[i].strip() if i < len(products) else ''
+        raw_qty = quantities[i] if i < len(quantities) else ''
+        raw_id = ids[i] if i < len(ids) else ''
+        if not school and not product and not raw_qty.strip():
+            continue
+        qty = _parse_amount(raw_qty)
+        rows.append({
+            'id': int(raw_id) if raw_id.isdigit() else None,
+            'school_id': school,
+            'product_id': product,
+            'quantity': raw_qty,
+            'quantity_value': qty,
+        })
+        if not school.isdigit() or int(school) not in price_map:
+            errors.append('School deliveries: choose a school.')
+        elif not product.isdigit() or int(product) not in product_names:
+            errors.append('School deliveries: choose a product.')
+        elif int(product) not in price_map[int(school)]:
+            errors.append(
+                f'No school price is set for {product_names[int(product)]}; ask the owner to add it.'
+            )
+        elif not qty:
+            errors.append(f'School deliveries: enter the kg delivered for {product_names[int(product)]}.')
+    return rows, errors
+
+
+def _save_deliveries(butchery, date, rows, price_map, user):
+    existing = {d.pk: d for d in SchoolDelivery.objects.filter(school__butchery=butchery, date=date)}
+
+    def update(delivery, row):
+        school_id, product_id = int(row['school_id']), int(row['product_id'])
+        # Keep the agreed price unless the school or product changed.
+        if (delivery.school_id, delivery.product_id) != (school_id, product_id):
+            delivery.unit_price = price_map[school_id][product_id]
+        delivery.school_id, delivery.product_id = school_id, product_id
+        delivery.quantity = row['quantity_value']
+        delivery.save()
+
+    def create(row):
+        school_id, product_id = int(row['school_id']), int(row['product_id'])
+        SchoolDelivery.objects.create(
+            school_id=school_id, product_id=product_id, date=date,
+            quantity=row['quantity_value'], unit_price=price_map[school_id][product_id],
+            recorded_by=user,
+        )
+    _sync_rows(existing, rows, update, create)
+
+
 def _branch_day_stats(butchery, date):
     rows = list(
         DailyStock.objects.filter(product__butchery=butchery, date=date)
@@ -278,8 +342,12 @@ def _branch_day_stats(butchery, date):
         t=Sum('amount'))['t'] or Decimal('0.00')
     summary = DailyBranchSummary.objects.filter(butchery=butchery, date=date).first()
     mpesa = summary.mpesa_amount if summary else Decimal('0.00')
+    school_sales = SchoolDelivery.objects.filter(school__butchery=butchery, date=date).aggregate(
+        t=Sum(F('quantity') * F('unit_price'), output_field=DecimalField(max_digits=14, decimal_places=2))
+    )['t'] or Decimal('0.00')
     gross = revenue - cogs
-    expected_cash = revenue - mpesa - expenses
+    # School deliveries are paid later by cheque, so they are not in the till.
+    expected_cash = revenue - mpesa - expenses - school_sales
     cash_counted = summary.cash_counted if summary else None
     return {
         'butchery': butchery,
@@ -291,6 +359,7 @@ def _branch_day_stats(butchery, date):
         'stock_value': stock_value,
         'entries': len(rows),
         'mpesa_amount': mpesa,
+        'school_sales': school_sales,
         'expected_cash': expected_cash,
         'cash_counted': cash_counted,
         'cash_variance': (cash_counted - expected_cash) if cash_counted is not None else None,
@@ -305,7 +374,7 @@ def _dashboard_context(date, branch_id=None):
         per_branch = [_branch_day_stats(branch, date)] if branch else []
     else:
         per_branch = [_branch_day_stats(b, date) for b in Butchery.objects.all()]
-    keys = ['revenue', 'cogs', 'gross_profit', 'expenses', 'net_profit', 'stock_value', 'mpesa_amount', 'expected_cash']
+    keys = ['revenue', 'cogs', 'gross_profit', 'expenses', 'net_profit', 'stock_value', 'mpesa_amount', 'school_sales', 'expected_cash']
     totals = {k: sum((b[k] for b in per_branch), Decimal('0.00')) for k in keys}
     totals['cash_variance'] = sum(
         (b['cash_variance'] for b in per_branch if b['cash_variance'] is not None), Decimal('0.00')
@@ -472,10 +541,12 @@ def stock_movement(request):
     return render(request, 'stock_movement.html', {'form': form})
 
 
-def _entry_context(user, branches, selected, locked, date, posted=None, posted_expenses=None, posted_transfers=None):
+def _entry_context(user, branches, selected, locked, date, posted=None, posted_expenses=None,
+                   posted_transfers=None, posted_deliveries=None):
     """Build the daily entry form context, from saved data or from a rejected submission."""
     summary = None
-    rows, expenses = [], []
+    rows, expenses, deliveries = [], [], []
+    school_prices = {}
     if selected:
         summary = (
             DailyBranchSummary.objects.select_related('recorded_by', 'closed_by')
@@ -523,6 +594,16 @@ def _entry_context(user, branches, selected, locked, date, posted=None, posted_e
                  'category_id': str(e.category_id or '')}
                 for e in Expense.objects.filter(butchery=selected, date=date).order_by('pk')
             ]
+        if selected.serves_schools:
+            school_prices = _school_price_map(selected)
+            if posted_deliveries is not None:
+                deliveries = posted_deliveries
+            else:
+                deliveries = [
+                    {'id': d.pk, 'school_id': str(d.school_id), 'product_id': str(d.product_id),
+                     'quantity': d.quantity}
+                    for d in SchoolDelivery.objects.filter(school__butchery=selected, date=date).order_by('pk')
+                ]
 
     if posted is not None:
         mpesa, cash_counted, notes = (
@@ -553,6 +634,13 @@ def _entry_context(user, branches, selected, locked, date, posted=None, posted_e
         'block_reason': block_reason,
         'missing_day': missing_day,
         'catching_up': missing_day is not None and missing_day == date,
+        'serves_schools': bool(selected and selected.serves_schools),
+        'schools': School.objects.filter(butchery=selected, is_active=True) if selected else [],
+        'deliveries': deliveries,
+        'school_prices': {
+            str(s): {str(p): float(price) for p, price in prices.items()}
+            for s, prices in school_prices.items()
+        },
     }
 
 
@@ -603,6 +691,29 @@ def daily_stock_entry(request):
         expenses, expense_errors = _parse_expense_rows(request.POST, categories)
         errors.extend(expense_errors)
 
+        deliveries, price_map = [], {}
+        if butchery.serves_schools:
+            price_map = _school_price_map(butchery)
+            deliveries, delivery_errors = _parse_delivery_rows(
+                request.POST, price_map, {p.id: p.name for p in products},
+            )
+            errors.extend(delivery_errors)
+            if not delivery_errors:
+                school_qty = {}
+                for d in deliveries:
+                    school_qty[int(d['product_id'])] = school_qty.get(int(d['product_id']), Decimal('0')) + d['quantity_value']
+                for product in products:
+                    q = quantities[product.pk]
+                    if product.pk not in school_qty or None in q.values():
+                        continue
+                    out = sum((r['quantity_value'] or Decimal('0') for r in transfers[product.pk]), Decimal('0'))
+                    sold = _opening_for(product, post_date) + q['received'] - out - q['wastage'] - q['closing']
+                    if school_qty[product.pk] > sold:
+                        errors.append(
+                            f'{product.name}: school deliveries ({school_qty[product.pk]}) are more than '
+                            f'the stock sold ({max(sold, Decimal("0"))}). Check the remaining stock.'
+                        )
+
         mpesa = _parse_amount(request.POST.get('mpesa_amount'))
         if mpesa is None:
             errors.append('M-Pesa amount must be zero or a positive number.')
@@ -616,7 +727,7 @@ def daily_stock_entry(request):
                 messages.error(request, error)
             ctx = _entry_context(
                 request.user, branches, butchery, locked, post_date,
-                request.POST, expenses, transfers,
+                request.POST, expenses, transfers, deliveries if butchery.serves_schools else None,
             )
             return render(request, 'daily_stock_entry.html', ctx, status=400)
 
@@ -647,6 +758,8 @@ def daily_stock_entry(request):
                 _carry_forward(product, row)
 
             _save_expenses(butchery, post_date, expenses, request.user, replace)
+            if butchery.serves_schools and replace:
+                _save_deliveries(butchery, post_date, deliveries, price_map, request.user)
             summary, _ = DailyBranchSummary.objects.update_or_create(
                 butchery=butchery, date=post_date,
                 defaults={
@@ -732,6 +845,7 @@ def daily_stock_readonly(request):
             to_butchery=branch, source_daily_stock__date=date,
         ).select_related('source_daily_stock__product__butchery'),
         'expenses': Expense.objects.filter(butchery=branch, date=date).select_related('category'),
+        'deliveries': SchoolDelivery.objects.filter(school__butchery=branch, date=date).select_related('school', 'product'),
         'summary': summary,
         'stats': _branch_day_stats(branch, date),
     }
@@ -786,6 +900,99 @@ def audit_log_list(request):
         'actions': AuditLog.objects.order_by('action').values_list('action', flat=True).distinct(),
         'q': q,
         'selected_action': action,
+    })
+
+
+def _week_bounds(request):
+    day = _parse_date(request.GET.get('week')) or _business_date()
+    start = day - timedelta(days=day.weekday())
+    return start, start + timedelta(days=6)
+
+
+def _school_week(school, week_start, week_end):
+    """Deliveries grouped by product, total, cheques and balance for one school and week."""
+    deliveries = [d for d in school.deliveries.all() if week_start <= d.date <= week_end]
+    lines = {}
+    for d in deliveries:
+        line = lines.setdefault(d.product.name, {'product': d.product.name, 'quantity': Decimal('0'), 'amount': Decimal('0')})
+        line['quantity'] += d.quantity
+        line['amount'] += d.amount
+    payments = [p for p in school.payments.all() if p.week_start == week_start]
+    total = sum((d.amount for d in deliveries), Decimal('0'))
+    paid = sum((p.amount for p in payments), Decimal('0'))
+    return {
+        'deliveries': sorted(deliveries, key=lambda d: (d.date, d.pk)),
+        'lines': sorted(lines.values(), key=lambda l: l['product']),
+        'total': total,
+        'payments': payments,
+        'paid': paid,
+        'balance': total - paid,
+    }
+
+
+@login_required
+def schools_report(request):
+    """Owner view: weekly school deliveries, cheques received and balances."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    week_start, week_end = _week_bounds(request)
+
+    if request.method == 'POST':
+        school = get_object_or_404(School, pk=request.POST.get('school_id') or 0)
+        amount = _parse_amount(request.POST.get('amount'))
+        cheque_number = request.POST.get('cheque_number', '').strip()
+        if not cheque_number or not amount:
+            messages.error(request, f'{school.name}: enter the cheque number and an amount greater than zero.')
+        else:
+            payment = SchoolPayment.objects.create(
+                school=school, week_start=week_start, cheque_number=cheque_number,
+                bank=request.POST.get('bank', '').strip(),
+                cheque_date=_parse_date(request.POST.get('cheque_date')) or localdate(),
+                amount=amount, recorded_by=request.user,
+            )
+            log_action(
+                request.user, 'SCHOOL_PAYMENT', 'SchoolPayment', payment.pk,
+                f"{school.name} cheque {cheque_number} for {amount} (week of {week_start})", request,
+            )
+            messages.success(request, f'Cheque recorded for {school.name}.')
+        return redirect(f"{reverse('schools_report')}?week={week_start}")
+
+    schools = School.objects.filter(butchery__serves_schools=True).select_related('butchery').prefetch_related(
+        'deliveries__product', 'payments',
+    )
+    rows = []
+    for school in schools:
+        week = _school_week(school, week_start, week_end)
+        delivered_all = sum((d.amount for d in school.deliveries.all()), Decimal('0'))
+        paid_all = sum((p.amount for p in school.payments.all()), Decimal('0'))
+        if week['total'] or week['payments'] or school.is_active:
+            rows.append({'school': school, 'owed_all_time': delivered_all - paid_all, **week})
+    return render(request, 'schools_report.html', {
+        'rows': rows,
+        'week_start': week_start,
+        'week_end': week_end,
+        'prev_week': week_start - timedelta(days=7),
+        'next_week': week_start + timedelta(days=7),
+        'week_total': sum((r['total'] for r in rows), Decimal('0')),
+        'week_paid': sum((r['paid'] for r in rows), Decimal('0')),
+        'owed_total': sum((r['owed_all_time'] for r in rows), Decimal('0')),
+    })
+
+
+@login_required
+def school_statement(request, pk):
+    """Printable weekly statement for one school."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    school = get_object_or_404(
+        School.objects.select_related('butchery').prefetch_related('deliveries__product', 'payments'), pk=pk,
+    )
+    week_start, week_end = _week_bounds(request)
+    return render(request, 'school_statement.html', {
+        'school': school,
+        'week_start': week_start,
+        'week_end': week_end,
+        **_school_week(school, week_start, week_end),
     })
 
 

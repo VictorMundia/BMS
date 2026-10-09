@@ -156,6 +156,27 @@
     {% endif %}
 </div>
 
+{% if branch.serves_schools %}
+<div class="bg-white rounded-lg shadow-sm border border-blue-100 p-6 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">School Deliveries</h2>
+    {% if deliveries %}
+    <table class="w-full text-sm text-left text-gray-600">
+        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+            <tr><th class="px-3 py-3">School</th><th class="px-3 py-3">Product</th><th class="px-3 py-3">Kg</th><th class="px-3 py-3">Price/kg</th><th class="px-3 py-3">Amount</th></tr>
+        </thead>
+        <tbody>
+            {% for d in deliveries %}
+            <tr class="border-b"><td class="px-3 py-2">{{ d.school.name }}</td><td class="px-3 py-2">{{ d.product.name }}</td><td class="px-3 py-2">{{ d.quantity }}</td><td class="px-3 py-2">{{ d.unit_price|floatformat:2 }}</td><td class="px-3 py-2">{{ d.amount|floatformat:2 }}</td></tr>
+            {% endfor %}
+        </tbody>
+        <tfoot><tr class="font-semibold text-gray-900"><td class="px-3 py-2" colspan="4">Total (paid by cheque)</td><td class="px-3 py-2">{{ stats.school_sales|floatformat:2 }}</td></tr></tfoot>
+    </table>
+    {% else %}
+    <p class="text-gray-400">No school deliveries for this day.</p>
+    {% endif %}
+</div>
+{% endif %}
+
 <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Expenses</h2>
     {% if expenses %}
@@ -197,6 +218,7 @@
             <dt class="text-gray-500">Revenue</dt><dd class="text-right">{{ stats.revenue|floatformat:2 }}</dd>
             <dt class="text-gray-500">M-Pesa</dt><dd class="text-right text-purple-600">{{ stats.mpesa_amount|floatformat:2 }}</dd>
             <dt class="text-gray-500">Expenses</dt><dd class="text-right text-red-600">{{ stats.expenses|floatformat:2 }}</dd>
+            {% if branch.serves_schools %}<dt class="text-gray-500">School deliveries (cheque)</dt><dd class="text-right text-blue-600">{{ stats.school_sales|floatformat:2 }}</dd>{% endif %}
             <dt class="font-semibold">Expected cash</dt><dd class="text-right font-semibold">{{ stats.expected_cash|floatformat:2 }}</dd>
             <dt class="text-gray-500">Cash handed over</dt><dd class="text-right">{% if stats.cash_counted is not None %}{{ stats.cash_counted|floatformat:2 }}{% else %}—{% endif %}</dd>
             <dt class="font-semibold">Difference</dt>

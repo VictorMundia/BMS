@@ -111,6 +111,7 @@
                 <tbody>
                     {% for row in rows %}
                     <tr class="border-b stock-row"
+                        data-pid="{{ row.product.id }}"
                         data-selling="{{ row.selling_price }}"
                         data-opening="{{ row.opening }}">
                         <td class="px-3 py-2 font-medium text-gray-900">
@@ -231,6 +232,84 @@
         </tr>
     </template>
 
+    {% if serves_schools %}
+    <div class="bg-white rounded-lg shadow-sm border border-blue-100 p-6 mb-6">
+        <div class="flex items-center justify-between mb-2">
+            <h2 class="text-lg font-semibold text-gray-900">School Deliveries</h2>
+            <button type="button" id="add-delivery" class="text-white bg-blue-600 hover:bg-blue-700 font-medium rounded-lg text-sm px-4 py-2">+ Add Delivery</button>
+        </div>
+        <p class="text-xs text-gray-500 mb-4">Meat delivered to schools today. Include it in the stock above (it comes out of the remaining stock). Schools pay by cheque, so it is not part of today's cash.</p>
+        {% if schools %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm text-left text-gray-600">
+                <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-3">School</th>
+                        <th class="px-3 py-3">Product</th>
+                        <th class="px-3 py-3">Kg</th>
+                        <th class="px-3 py-3">Amount</th>
+                        <th class="px-3 py-3"></th>
+                    </tr>
+                </thead>
+                <tbody id="delivery-body">
+                    {% for d in deliveries %}
+                    <tr class="delivery-row">
+                        <td class="px-3 py-2">
+                            <input type="hidden" name="delivery_id" value="{{ d.id|default_if_none:'' }}">
+                            <select name="delivery_school" class="delivery-school bg-gray-50 border border-gray-300 rounded-lg p-2">
+                                <option value="">Choose school</option>
+                                {% for s in schools %}<option value="{{ s.id }}" {% if d.school_id == s.id|stringformat:'s' %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+                            </select>
+                        </td>
+                        <td class="px-3 py-2">
+                            <select name="delivery_product" class="delivery-product bg-gray-50 border border-gray-300 rounded-lg p-2">
+                                <option value="">Choose product</option>
+                                {% for row in rows %}<option value="{{ row.product.id }}" {% if d.product_id == row.product.id|stringformat:'s' %}selected{% endif %}>{{ row.product.name }}</option>{% endfor %}
+                            </select>
+                        </td>
+                        <td class="px-3 py-2">
+                            <input type="number" step="0.01" min="0" inputmode="decimal" name="delivery_quantity" value="{{ d.quantity }}" class="delivery-qty w-24 bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="Kg">
+                        </td>
+                        <td class="px-3 py-2 delivery-amount font-medium">0.00</td>
+                        <td class="px-3 py-2"><button type="button" class="remove-row text-red-600 hover:underline text-sm">Remove</button></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="font-semibold text-gray-900"><td class="px-3 py-2" colspan="3">Total to schools</td><td class="px-3 py-2" id="school-total">0.00</td><td></td></tr>
+                </tfoot>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-400">No schools set up yet. The owner can add schools and their prices.</p>
+        {% endif %}
+    </div>
+
+    <template id="delivery-row-template">
+        <tr class="delivery-row">
+            <td class="px-3 py-2">
+                <input type="hidden" name="delivery_id" value="">
+                <select name="delivery_school" class="delivery-school bg-gray-50 border border-gray-300 rounded-lg p-2">
+                    <option value="">Choose school</option>
+                    {% for s in schools %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+                </select>
+            </td>
+            <td class="px-3 py-2">
+                <select name="delivery_product" class="delivery-product bg-gray-50 border border-gray-300 rounded-lg p-2">
+                    <option value="">Choose product</option>
+                    {% for row in rows %}<option value="{{ row.product.id }}">{{ row.product.name }}</option>{% endfor %}
+                </select>
+            </td>
+            <td class="px-3 py-2">
+                <input type="number" step="0.01" min="0" inputmode="decimal" name="delivery_quantity" class="delivery-qty w-24 bg-gray-50 border border-gray-300 rounded-lg p-2" placeholder="Kg">
+            </td>
+            <td class="px-3 py-2 delivery-amount font-medium">0.00</td>
+            <td class="px-3 py-2"><button type="button" class="remove-row text-red-600 hover:underline text-sm">Remove</button></td>
+        </tr>
+    </template>
+    {{ school_prices|json_script:"school-prices" }}
+    {% endif %}
+
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">M-Pesa Collections</h2>
@@ -243,7 +322,7 @@
             <input type="number" step="0.01" min="0" inputmode="decimal" name="cash_counted" id="cash-counted" value="{{ cash_counted }}" class="w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5" placeholder="0.00">
             <p class="text-sm text-gray-600 mt-3">Expected cash: <span id="expected-cash" class="font-semibold">0.00</span></p>
             <p class="text-sm mt-1">Difference: <span id="cash-variance" class="font-semibold">—</span></p>
-            <p class="text-xs text-gray-400 mt-2">Expected cash = Revenue − M-Pesa − Expenses</p>
+            <p class="text-xs text-gray-400 mt-2">Expected cash = Revenue − M-Pesa − Expenses{% if serves_schools %} − School deliveries{% endif %}</p>
         </div>
         <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Notes to Owner</h2>
@@ -265,7 +344,29 @@
 (function(){
     const form = document.getElementById('entry-form');
     const num = el => parseFloat(el && el.value) || 0;
+    const pricesEl = document.getElementById('school-prices');
+    const schoolPrices = pricesEl ? JSON.parse(pricesEl.textContent) : {};
     function recalc(){
+        // kg and amount delivered to schools, per product
+        const school = {};
+        let schoolTotal = 0;
+        document.querySelectorAll('.delivery-row').forEach(function(tr){
+            const sid = tr.querySelector('.delivery-school').value;
+            const pid = tr.querySelector('.delivery-product').value;
+            const qty = num(tr.querySelector('.delivery-qty'));
+            const price = (schoolPrices[sid] || {})[pid] || 0;
+            const amount = qty * price;
+            tr.querySelector('.delivery-amount').textContent = (sid && pid && !price) ? 'No price set' : amount.toFixed(2);
+            if(pid){
+                school[pid] = school[pid] || {qty: 0, amount: 0};
+                school[pid].qty += qty;
+                school[pid].amount += amount;
+            }
+            schoolTotal += amount;
+        });
+        const schoolTotalEl = document.getElementById('school-total');
+        if(schoolTotalEl) schoolTotalEl.textContent = schoolTotal.toFixed(2);
+
         let totalRev = 0;
         document.querySelectorAll('.stock-row').forEach(function(row){
             const opening = parseFloat(row.dataset.opening) || 0;
@@ -276,7 +377,8 @@
                 - num(row.querySelector('.wastage')) - num(row.querySelector('.closing'));
             row.classList.toggle('bg-yellow-50', sold < 0);
             if(sold < 0) sold = 0;
-            const rev = sold * selling;
+            const s = school[row.dataset.pid] || {qty: 0, amount: 0};
+            const rev = Math.max(sold - s.qty, 0) * selling + s.amount;
             row.querySelector('.sold-cell').textContent = sold.toFixed(2);
             row.querySelector('.revenue-cell').textContent = rev.toFixed(2);
             totalRev += rev;
@@ -285,7 +387,7 @@
 
         let totalExp = 0;
         document.querySelectorAll('.exp-amount').forEach(el => totalExp += num(el));
-        const expected = totalRev - num(document.getElementById('mpesa-amount')) - totalExp;
+        const expected = totalRev - num(document.getElementById('mpesa-amount')) - totalExp - schoolTotal;
         document.getElementById('expected-cash').textContent = expected.toFixed(2);
         const counted = document.getElementById('cash-counted');
         const variance = document.getElementById('cash-variance');
@@ -310,6 +412,9 @@
             box.insertAdjacentHTML('beforeend', transferTmpl.replaceAll('__PID__', pid));
         } else if(t.id === 'add-expense'){
             document.getElementById('expense-body').appendChild(expenseTmpl.content.cloneNode(true));
+        } else if(t.id === 'add-delivery'){
+            const body = document.getElementById('delivery-body');
+            if(body) body.appendChild(document.getElementById('delivery-row-template').content.cloneNode(true));
         } else if(t.classList.contains('remove-row')){
             (t.closest('.transfer-row') || t.closest('tr')).remove();
             recalc();

@@ -14,7 +14,7 @@ from django.urls import reverse
 from .management.commands.send_daily_summary import build_daily_summary
 from .models import (
     AuditLog, BuyingPrice, Butchery, DailyBranchSummary, DailyStock, DailyTransfer, DatePermission,
-    Expense, MeatCategory, MeatProduct, Staff,
+    Expense, MeatCategory, MeatProduct, School, SchoolDelivery, SchoolPrice, Staff,
 )
 from .views import _business_date, _entry_status_grid
 
@@ -448,6 +448,117 @@ class DailySummarySMSTests(TestCase):
         with mock.patch('urllib.request.urlopen', return_value=self.fake_response()) as urlopen:
             call_command('send_daily_summary', stdout=StringIO())
         self.assertIn('sandbox', urlopen.call_args[0][0].full_url)
+
+
+class SchoolDeliveryTests(TestCase):
+    def setUp(self):
+        self.today = _business_date()
+        self.owner = User.objects.create_superuser('owner', password='pw-owner-123')
+        self.butcher = User.objects.create_user('butcher', password='pw-butcher-123')
+        self.supa = Butchery.objects.create(name='Supa', location='Karen', phone='1', serves_schools=True)
+        Staff.objects.create(
+            user=self.butcher, butchery=self.supa, role='BUTCHER', phone='3',
+            id_number='ID1', date_hired=self.today,
+        )
+        cat = MeatCategory.objects.create(name='Beef')
+        self.beef = MeatProduct.objects.create(
+            category=cat, name='Beef', buying_price=Decimal('500'), selling_price=Decimal('700'), butchery=self.supa,
+        )
+        self.minced = MeatProduct.objects.create(
+            category=cat, name='Minced Meat', buying_price=Decimal('550'), selling_price=Decimal('750'), butchery=self.supa,
+        )
+        self.school = School.objects.create(butchery=self.supa, name='Hill School')
+        SchoolPrice.objects.create(school=self.school, product=self.beef, price_per_unit=Decimal('800'))
+        SchoolPrice.objects.create(school=self.school, product=self.minced, price_per_unit=Decimal('900'))
+        self.url = reverse('daily_stock_entry')
+
+    def post(self, deliveries=(), user=None, **extra):
+        self.client.force_login(user or self.butcher)
+        data = {
+            'form_version': '2', 'butchery': self.supa.id, 'date': self.today.isoformat(),
+            f'received_{self.beef.id}': '20', f'closing_{self.beef.id}': '5',
+            f'received_{self.minced.id}': '10', f'closing_{self.minced.id}': '10',
+            'mpesa_amount': '0',
+            'delivery_id': [d[0] for d in deliveries],
+            'delivery_school': [str(self.school.id) for _ in deliveries],
+            'delivery_product': [str(d[1].id) for d in deliveries],
+            'delivery_quantity': [d[2] for d in deliveries],
+        }
+        data.update(extra)
+        return self.client.post(self.url, data)
+
+    def test_revenue_uses_school_price_and_cash_excludes_deliveries(self):
+        self.post([('', self.beef, '10')])
+        ds = DailyStock.objects.get(product=self.beef, date=self.today)
+        self.assertEqual(ds.sold, Decimal('15'))
+        self.assertEqual(ds.revenue, Decimal('11500'))  # 5 kg x 700 + 10 kg x 800
+        self.client.force_login(self.owner)
+        data = self.client.get(reverse('dashboard_data'), {'date': self.today.isoformat()}).json()
+        self.assertEqual(data['per_branch'][0]['expected_cash'], 3500.0)
+
+    def test_resave_updates_and_remove_deletes(self):
+        self.post([('', self.beef, '10')])
+        delivery = SchoolDelivery.objects.get()
+        self.post([(str(delivery.pk), self.beef, '12')])
+        delivery.refresh_from_db()
+        self.assertEqual(SchoolDelivery.objects.count(), 1)
+        self.assertEqual(delivery.quantity, Decimal('12'))
+        self.post([])
+        self.assertFalse(SchoolDelivery.objects.exists())
+
+    def test_price_kept_when_school_price_changes(self):
+        self.post([('', self.beef, '10')])
+        SchoolPrice.objects.filter(product=self.beef).update(price_per_unit=Decimal('850'))
+        delivery = SchoolDelivery.objects.get()
+        self.post([(str(delivery.pk), self.beef, '11')])
+        delivery.refresh_from_db()
+        self.assertEqual(delivery.unit_price, Decimal('800'))
+
+    def test_delivery_more_than_sold_rejected(self):
+        resp = self.post([('', self.minced, '3')])  # minced sold 0
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(SchoolDelivery.objects.exists())
+
+    def test_missing_price_rejected(self):
+        SchoolPrice.objects.filter(product=self.beef).delete()
+        resp = self.post([('', self.beef, '5')])
+        self.assertEqual(resp.status_code, 400)
+
+    def test_section_only_for_school_branch(self):
+        other = Butchery.objects.create(name='Starlight', location='CBD', phone='2')
+        self.client.force_login(self.owner)
+        self.assertNotContains(self.client.get(self.url, {'butchery': other.id}), 'School Deliveries')
+        self.assertContains(self.client.get(self.url, {'butchery': self.supa.id}), 'School Deliveries')
+
+    def test_schools_report_and_cheque(self):
+        self.post([('', self.beef, '10'), ('', self.minced, '0')], **{f'closing_{self.minced.id}': '8'})
+        self.assertEqual(SchoolDelivery.objects.count(), 0)  # zero kg row rejected the whole save
+        self.post([('', self.beef, '10'), ('', self.minced, '2')], **{f'closing_{self.minced.id}': '8'})
+        self.client.force_login(self.owner)
+        url = reverse('schools_report')
+        resp = self.client.get(url, {'week': self.today.isoformat()})
+        row = resp.context['rows'][0]
+        self.assertEqual(row['total'], Decimal('9800'))  # 10x800 + 2x900
+        self.client.post(f"{url}?week={self.today.isoformat()}", {
+            'school_id': self.school.id, 'cheque_number': '000123', 'amount': '9800',
+        })
+        resp = self.client.get(url, {'week': self.today.isoformat()})
+        self.assertEqual(resp.context['rows'][0]['balance'], Decimal('0'))
+        self.assertEqual(resp.context['owed_total'], Decimal('0'))
+        statement = self.client.get(reverse('school_statement', args=[self.school.id]), {'week': self.today.isoformat()})
+        self.assertContains(statement, 'Hill School')
+        self.assertContains(statement, '000123')
+
+    def test_butcher_cannot_open_schools_page(self):
+        self.client.force_login(self.butcher)
+        resp = self.client.get(reverse('schools_report'))
+        self.assertRedirects(resp, self.url, fetch_redirect_response=False)
+
+    def test_admin_school_pages_render(self):
+        self.client.force_login(self.owner)
+        for name, args in (('admin:inventory_school_changelist', []), ('admin:inventory_school_add', []),
+                           ('admin:inventory_school_change', [self.school.id])):
+            self.assertEqual(self.client.get(reverse(name, args=args)).status_code, 200, name)
 
 
 class DuplicateExpenseCommandTests(TestCase):

@@ -6,7 +6,44 @@ from .models import (
     MeatCategory, Butchery, MeatProduct, StockMovement,
     DailyStock, DailyBranchSummary, ExpenseCategory, Expense,
     Staff, Shift, StockTransfer, AuditLog, DatePermission, BuyingPrice,
+    School, SchoolPrice, SchoolDelivery, SchoolPayment,
 )
+
+
+class SchoolPriceInline(admin.TabularInline):
+    model = SchoolPrice
+    extra = 2
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'product':
+            kwargs['queryset'] = MeatProduct.objects.filter(butchery__serves_schools=True).select_related('butchery')
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+
+@admin.register(School)
+class SchoolAdmin(admin.ModelAdmin):
+    list_display = ('name', 'butchery', 'contact_person', 'phone', 'is_active')
+    list_filter = ('butchery', 'is_active')
+    search_fields = ('name', 'contact_person')
+    inlines = [SchoolPriceInline]
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'butchery':
+            kwargs['queryset'] = Butchery.objects.filter(serves_schools=True)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+
+@admin.register(SchoolDelivery)
+class SchoolDeliveryAdmin(admin.ModelAdmin):
+    list_display = ('date', 'school', 'product', 'quantity', 'unit_price', 'recorded_by')
+    list_filter = ('school', 'date')
+
+
+@admin.register(SchoolPayment)
+class SchoolPaymentAdmin(admin.ModelAdmin):
+    list_display = ('week_start', 'school', 'cheque_number', 'bank', 'cheque_date', 'amount')
+    list_filter = ('school',)
+    search_fields = ('cheque_number',)
 
 
 @admin.register(MeatCategory)
@@ -17,7 +54,7 @@ class MeatCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Butchery)
 class ButcheryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'location', 'manager')
+    list_display = ('name', 'location', 'manager', 'serves_schools')
     search_fields = ('name', 'location')
 
 
