@@ -115,6 +115,37 @@ def _has_date_permission(user, butchery, date):
     ).exists()
 
 
+def _first_missing_day(butchery):
+    """Oldest past business day the branch left empty (no entry, not closed), or None.
+
+    Only days from MISSING_DAY_ENFORCE_FROM and from the branch's first ever entry count.
+    """
+    today = _business_date()
+    firsts = [
+        DailyStock.objects.filter(product__butchery=butchery).aggregate(d=Min('date'))['d'],
+        DailyBranchSummary.objects.filter(butchery=butchery).aggregate(d=Min('date'))['d'],
+    ]
+    firsts = [d for d in firsts if d]
+    if not firsts:
+        return None
+    start = max(settings.MISSING_DAY_ENFORCE_FROM, min(firsts))
+    if start >= today:
+        return None
+    entered = set(
+        DailyStock.objects.filter(product__butchery=butchery, date__range=(start, today))
+        .values_list('date', flat=True)
+    ) | set(
+        DailyBranchSummary.objects.filter(butchery=butchery, date__range=(start, today))
+        .values_list('date', flat=True)
+    )
+    day = start
+    while day < today:
+        if day not in entered:
+            return day
+        day += timedelta(days=1)
+    return None
+
+
 def _edit_block_reason(user, butchery, date, summary):
     """Return why `user` may not edit this branch/day, or '' if they may."""
     business_day = _business_date()
@@ -124,6 +155,11 @@ def _edit_block_reason(user, butchery, date, summary):
         return ''
     if summary and summary.is_closed:
         return 'This day has been closed by the owner and can no longer be edited.'
+    missing = _first_missing_day(butchery)
+    if missing:
+        if date == missing:
+            return ''
+        return f"No data was entered for {missing:%a %d %b}. Fill in that day first."
     if date != business_day:
         return 'You can only edit data for today. Contact the admin to make changes to past dates.'
     return ''
@@ -498,6 +534,7 @@ def _entry_context(user, branches, selected, locked, date, posted=None, posted_e
         notes = summary.notes if summary else ''
 
     block_reason = _edit_block_reason(user, selected, date, summary) if selected else ''
+    missing_day = _first_missing_day(selected) if selected else None
     return {
         'branches': branches,
         'other_branches': [b for b in branches if not selected or b.id != selected.id],
@@ -514,6 +551,8 @@ def _entry_context(user, branches, selected, locked, date, posted=None, posted_e
         'summary': summary,
         'can_edit': not block_reason,
         'block_reason': block_reason,
+        'missing_day': missing_day,
+        'catching_up': missing_day is not None and missing_day == date,
     }
 
 
@@ -629,6 +668,9 @@ def daily_stock_entry(request):
                 'Remaining stock is more than what was available for: '
                 + ', '.join(shortfalls) + '. Please re-check the counts.',
             )
+        if not request.user.is_superuser and post_date != _business_date():
+            next_day = _first_missing_day(butchery) or _business_date()
+            redirect_url = f"{reverse('daily_stock_entry')}?butchery={butchery.id}&date={next_day}"
         return redirect(redirect_url)
 
     date = _parse_date(request.GET.get('date')) or _business_date()
@@ -636,6 +678,14 @@ def daily_stock_entry(request):
     if selected is None:
         raw_id = request.GET.get('butchery', '')
         selected = next((b for b in branches if str(b.id) == raw_id), None) or (branches[0] if branches else None)
+    if selected and not request.user.is_superuser:
+        missing = _first_missing_day(selected)
+        if missing and date != missing and not _has_date_permission(request.user, selected, date):
+            messages.warning(
+                request,
+                f"No data was entered for {missing:%A %d %B}. Fill it in before you can record other days.",
+            )
+            return redirect(f"{reverse('daily_stock_entry')}?butchery={selected.id}&date={missing}")
     ctx = _entry_context(request.user, branches, selected, locked, date)
     return render(request, 'daily_stock_entry.html', ctx)
 

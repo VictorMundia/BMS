@@ -50,6 +50,27 @@
 {% if not can_edit %}
 <div class="mb-4 p-4 rounded-lg text-sm bg-red-50 text-red-800">{{ block_reason }}</div>
 {% endif %}
+{% if catching_up and not user.is_superuser %}
+<div class="mb-4 p-4 rounded-lg text-sm bg-orange-50 text-orange-800 border border-orange-200">
+    <strong>Catch up:</strong> no data was entered for {{ missing_day|date:"l j F" }}. Fill in this day and save.
+    You can record today ({{ today }}) once all missed days are filled in.
+</div>
+{% elif missing_day and user.is_superuser %}
+<div class="mb-4 p-4 rounded-lg text-sm bg-orange-50 text-orange-800 border border-orange-200">
+    {{ selected.name }} has no entry for {{ missing_day|date:"l j F" }}; staff must fill it in before recording other days.
+    {% if not catching_up %}<a class="underline" href="?butchery={{ selected.id }}&date={{ missing_day|date:'Y-m-d' }}">Open that day</a>{% endif %}
+</div>
+{% endif %}
+{% if user.is_superuser and not summary %}
+<form method="post" action="{% url 'daily_close' %}" class="mb-4 flex items-center gap-3 text-sm">
+    {% csrf_token %}
+    <input type="hidden" name="butchery_id" value="{{ selected.id }}">
+    <input type="hidden" name="date" value="{{ date }}">
+    <button name="action" value="close" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg px-4 py-2"
+            onclick="return confirm('Mark {{ selected.name|escapejs }} on {{ date }} as a no-trading day?');">Mark as No Trading</button>
+    <span class="text-gray-500">Use this if the branch was closed this day; it won't count as missing.</span>
+</form>
+{% endif %}
 
 <template id="transfer-row-template">
     <div class="transfer-row flex gap-2 mb-1">

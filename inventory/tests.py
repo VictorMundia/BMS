@@ -1,10 +1,10 @@
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from io import StringIO
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from .models import (
@@ -266,6 +266,107 @@ class MissingEntriesGridTests(TestCase):
         self.assertEqual(resp.context['missing_total'], 2)
         resp = self.client.get(reverse('home'), {'missing_days': '999'})
         self.assertEqual(resp.context['missing_days'], 14)
+
+
+@override_settings(MISSING_DAY_ENFORCE_FROM=date(2000, 1, 1))
+class MissedDayGateTests(TestCase):
+    def setUp(self):
+        self.today = _business_date()
+        self.owner = User.objects.create_superuser('owner', password='pw-owner-123')
+        self.butcher = User.objects.create_user('butcher', password='pw-butcher-123')
+        self.branch = Butchery.objects.create(name='Main', location='Town', phone='1')
+        Staff.objects.create(
+            user=self.butcher, butchery=self.branch, role='BUTCHER', phone='3',
+            id_number='ID1', date_hired=self.today,
+        )
+        cat = MeatCategory.objects.create(name='Beef')
+        self.beef = MeatProduct.objects.create(
+            category=cat, name='Beef', buying_price=Decimal('500'),
+            selling_price=Decimal('700'), butchery=self.branch,
+        )
+        self.url = reverse('daily_stock_entry')
+        # Entered 3 days ago; 2 days ago and yesterday were missed.
+        DailyBranchSummary.objects.create(butchery=self.branch, date=self.ago(3))
+
+    def ago(self, n):
+        return self.today - timedelta(days=n)
+
+    def post(self, user, day):
+        self.client.force_login(user)
+        return self.client.post(self.url, {
+            'form_version': '2', 'butchery': self.branch.id, 'date': day.isoformat(),
+            f'received_{self.beef.id}': '5', f'wastage_{self.beef.id}': '0',
+            f'closing_{self.beef.id}': '1', 'mpesa_amount': '0',
+        })
+
+    def saved(self, day):
+        return DailyStock.objects.filter(product=self.beef, date=day).exists()
+
+    def test_butcher_blocked_from_today_and_redirected_to_oldest_missed_day(self):
+        self.post(self.butcher, self.today)
+        self.assertFalse(self.saved(self.today))
+        resp = self.client.get(self.url)
+        self.assertRedirects(
+            resp, f"{self.url}?butchery={self.branch.id}&date={self.ago(2)}",
+            fetch_redirect_response=False,
+        )
+
+    def test_must_fill_oldest_first(self):
+        self.post(self.butcher, self.ago(1))
+        self.assertFalse(self.saved(self.ago(1)))
+
+    def test_catching_up_then_today(self):
+        resp = self.post(self.butcher, self.ago(2))
+        self.assertTrue(self.saved(self.ago(2)))
+        self.assertRedirects(
+            resp, f"{self.url}?butchery={self.branch.id}&date={self.ago(1)}",
+            fetch_redirect_response=False,
+        )
+        resp = self.post(self.butcher, self.ago(1))
+        self.assertRedirects(
+            resp, f"{self.url}?butchery={self.branch.id}&date={self.today}",
+            fetch_redirect_response=False,
+        )
+        self.post(self.butcher, self.today)
+        self.assertTrue(self.saved(self.today))
+
+    def test_filled_past_day_is_locked_again(self):
+        self.post(self.butcher, self.ago(2))
+        self.post(self.butcher, self.ago(1))
+        DailyStock.objects.filter(date=self.ago(2)).update(closing_stock=Decimal('1'))
+        self.client.force_login(self.butcher)
+        self.client.post(self.url, {
+            'form_version': '2', 'butchery': self.branch.id, 'date': self.ago(2).isoformat(),
+            f'received_{self.beef.id}': '5', f'closing_{self.beef.id}': '3',
+        })
+        self.assertEqual(DailyStock.objects.get(date=self.ago(2)).closing_stock, Decimal('1'))
+
+    def test_no_trading_day_does_not_block(self):
+        self.client.force_login(self.owner)
+        for n in (2, 1):
+            self.client.post(reverse('daily_close'), {
+                'butchery_id': self.branch.id, 'date': self.ago(n).isoformat(), 'action': 'close',
+            })
+        self.post(self.butcher, self.today)
+        self.assertTrue(self.saved(self.today))
+
+    def test_owner_never_blocked(self):
+        self.post(self.owner, self.today)
+        self.assertTrue(self.saved(self.today))
+
+    def test_days_before_enforcement_start_ignored(self):
+        with override_settings(MISSING_DAY_ENFORCE_FROM=self.ago(1)):
+            self.post(self.butcher, self.today)
+            self.assertFalse(self.saved(self.today))
+            self.post(self.butcher, self.ago(1))
+            self.post(self.butcher, self.today)
+            self.assertTrue(self.saved(self.today))
+            self.assertFalse(self.saved(self.ago(2)))
+
+    def test_branch_without_entries_not_blocked(self):
+        DailyBranchSummary.objects.all().delete()
+        self.post(self.butcher, self.today)
+        self.assertTrue(self.saved(self.today))
 
 
 class DuplicateExpenseCommandTests(TestCase):

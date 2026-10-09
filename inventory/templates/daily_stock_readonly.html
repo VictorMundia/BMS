@@ -36,6 +36,9 @@
         <input type="hidden" name="date" value="{{ date|date:'Y-m-d' }}">
         {% if summary.is_closed %}
         <button name="action" value="reopen" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-4 py-2">Reopen Day</button>
+        {% elif not summary %}
+        <button name="action" value="close" class="text-gray-700 bg-gray-100 hover:bg-gray-200 font-medium rounded-lg text-sm px-4 py-2"
+                onclick="return confirm('Mark this day as no trading? It will not count as missing.');">Mark as No Trading</button>
         {% else %}
         <button name="action" value="close" class="text-white bg-gray-800 hover:bg-gray-900 font-medium rounded-lg text-sm px-4 py-2">Close Day</button>
         {% endif %}

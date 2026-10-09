@@ -1,5 +1,6 @@
 """Django settings for butchery_system project."""
 import os
+from datetime import date
 from pathlib import Path
 
 from decouple import Csv, config
@@ -111,6 +112,11 @@ USE_TZ = True
 
 # Local hour at which a new business day starts (entries before it count for the previous day).
 BUSINESS_DAY_CUTOFF_HOUR = config('BUSINESS_DAY_CUTOFF_HOUR', default=4, cast=int)
+
+# Staff must fill in days they missed (from this date on) before recording other days.
+MISSING_DAY_ENFORCE_FROM = config(
+    'MISSING_DAY_ENFORCE_FROM', default='2026-10-09', cast=date.fromisoformat,
+)
 
 # Media files (uploaded receipt images, etc.)
 MEDIA_URL = '/media/'
