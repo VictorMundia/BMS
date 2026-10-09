@@ -93,6 +93,9 @@ STORAGES = {
     # Not the Manifest variant: Jazzmin's CSS references a .map file it doesn't ship.
     'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
 }
+# Heroku's disk is wiped on restart, so uploads (receipt photos) go to Cloudinary when configured.
+if config('CLOUDINARY_URL', default=''):
+    STORAGES['default'] = {'BACKEND': 'cloudinary_storage.storage.MediaCloudinaryStorage'}
 
 
 # Password validation
@@ -135,9 +138,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/inventory/'
 
-# Session configuration
-SESSION_COOKIE_AGE = 315360000  # 10 years (permanent session)
-SESSION_SAVE_EVERY_REQUEST = False
+# Session configuration: log out after 30 days without using the app.
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 30
+SESSION_SAVE_EVERY_REQUEST = True
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
 # Email configuration (credentials sourced via python-decouple)
@@ -186,7 +189,6 @@ JAZZMIN_SETTINGS = {
         {'title': 'Users', 'apps': ['auth'], 'icon': 'fas fa-users'},
     ],
     'search_url': 'admin:search',
-    'user_avatar': 'img/user-icon.png',
     'top_menu_links': [
         {'title': 'Dashboard', 'url': '/', 'icon': 'fas fa-home'},
         {'title': 'Support', 'url': 'https://github.com/farridav/django-jazzmin', 'icon': 'fas fa-life-ring'},

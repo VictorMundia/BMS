@@ -8,6 +8,8 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.forms import AuthenticationForm
+from django.contrib.auth.models import User
+from django.contrib.sessions.models import Session
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -476,6 +478,9 @@ def home_view(request):
         'branches': Butchery.objects.all(),
         'missing_days': missing_days,
         'missing_range_choices': MISSING_RANGE_CHOICES,
+        'products_without_cost': MeatProduct.objects.filter(
+            buying_price__lte=0, buying_prices__isnull=True,
+        ).count(),
         **_entry_status_grid(missing_days),
     }
     )
@@ -1259,6 +1264,24 @@ def staff_create(request):
     else:
         form = StaffCreateForm()
     return render(request, 'staff_create.html', {'form': form})
+
+
+@login_required
+@require_POST
+def staff_logout_everywhere(request, user_id):
+    """End every login session of one user (e.g. lost phone, staff left)."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    target = get_object_or_404(User, pk=user_id)
+    ended = 0
+    for session in Session.objects.filter(expire_date__gt=now()):
+        if session.get_decoded().get('_auth_user_id') == str(target.pk):
+            session.delete()
+            ended += 1
+    log_action(request.user, 'LOGOUT_EVERYWHERE', 'User', target.pk,
+               f"Ended {ended} session(s) of {target.username}", request)
+    messages.success(request, f'{target.username} has been logged out on all devices ({ended}).')
+    return redirect('staff_list')
 
 
 # ===========================================================================

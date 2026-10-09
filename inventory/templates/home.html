@@ -2,6 +2,12 @@
 {% block title %}Dashboard - BMS{% endblock %}
 
 {% block content %}
+{% if products_without_cost %}
+<div class="mb-4 p-4 rounded-lg text-sm bg-yellow-50 text-yellow-800 border border-yellow-200">
+    <strong>{{ products_without_cost }} product{{ products_without_cost|pluralize }}</strong> {{ products_without_cost|pluralize:"has,have" }} no buying price, so cost of sales counts as 0 and profit figures are overstated.
+    <a href="{% url 'buying_prices' %}" class="underline font-medium">Enter buying prices</a>
+</div>
+{% endif %}
 <div class="flex flex-wrap items-center justify-between mb-6 gap-3">
     <div>
         <h1 class="text-2xl font-bold text-gray-900">Owner Dashboard</h1>

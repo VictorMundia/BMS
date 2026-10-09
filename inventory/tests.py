@@ -561,6 +561,51 @@ class SchoolDeliveryTests(TestCase):
             self.assertEqual(self.client.get(reverse(name, args=args)).status_code, 200, name)
 
 
+class SecurityUpgradeTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_superuser('owner', password='pw-owner-123')
+        self.butcher = User.objects.create_user('butcher', password='pw-butcher-123')
+        branch = Butchery.objects.create(name='Main', location='Town', phone='1')
+        Staff.objects.create(
+            user=self.butcher, butchery=branch, role='BUTCHER', phone='3',
+            id_number='ID1', date_hired=_business_date(),
+        )
+        cat = MeatCategory.objects.create(name='Beef')
+        self.beef = MeatProduct.objects.create(
+            category=cat, name='Beef', buying_price=Decimal('0'), selling_price=Decimal('700'), butchery=branch,
+        )
+
+    def test_logins_last_30_days(self):
+        from django.conf import settings
+        self.assertEqual(settings.SESSION_COOKIE_AGE, 60 * 60 * 24 * 30)
+        self.assertTrue(settings.SESSION_SAVE_EVERY_REQUEST)
+
+    def test_log_out_everywhere(self):
+        butcher_client = self.client_class()
+        butcher_client.force_login(self.butcher)
+        self.client.force_login(self.owner)
+        self.client.post(reverse('staff_logout_everywhere', args=[self.butcher.id]))
+        resp = butcher_client.get(reverse('daily_stock_entry'))
+        self.assertRedirects(resp, reverse('login'), fetch_redirect_response=False)
+        self.assertEqual(self.client.get(reverse('home')).status_code, 200)
+
+    def test_butcher_cannot_log_out_others(self):
+        self.client.force_login(self.butcher)
+        self.client.post(reverse('staff_logout_everywhere', args=[self.owner.id]))
+        owner_client = self.client_class()
+        owner_client.force_login(self.owner)
+        self.assertEqual(owner_client.get(reverse('home')).status_code, 200)
+
+    def test_missing_buying_price_banner(self):
+        self.client.force_login(self.owner)
+        self.assertContains(self.client.get(reverse('home')), 'no buying price')
+        BuyingPrice.objects.create(
+            product=self.beef, date=_business_date(), buying_price_per_kg=Decimal('550'),
+            quantity_received=Decimal('1'),
+        )
+        self.assertNotContains(self.client.get(reverse('home')), 'no buying price')
+
+
 class DuplicateExpenseCommandTests(TestCase):
     def test_finds_and_deletes_duplicates(self):
         branch = Butchery.objects.create(name='Main', location='Town', phone='1')

@@ -1,8 +1,10 @@
-Django>=4.2,<4.3
+Django>=5.2,<5.3
 whitenoise>=6.6,<7
 psycopg2-binary==2.9.9
 python-decouple==3.8
 Pillow>=10.4.0
 gunicorn==21.2.0
 dj-database-url==2.1.0
-django-jazzmin==2.6.0
+django-jazzmin>=3.0,<3.1
+cloudinary>=1.40,<2
+django-cloudinary-storage==0.3.0

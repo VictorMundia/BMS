@@ -29,6 +29,7 @@ urlpatterns = [
     # Staff
     path('staff/', views.staff_list, name='staff_list'),
     path('staff/create/', views.staff_create, name='staff_create'),
+    path('staff/<int:user_id>/logout-everywhere/', views.staff_logout_everywhere, name='staff_logout_everywhere'),
     # Stock transfers
     path('transfers/create/', views.transfer_create, name='transfer_create'),
     path('transfers/<int:pk>/approve/', views.transfer_approve, name='transfer_approve'),
