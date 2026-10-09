@@ -118,6 +118,12 @@ MISSING_DAY_ENFORCE_FROM = config(
     'MISSING_DAY_ENFORCE_FROM', default='2026-10-09', cast=date.fromisoformat,
 )
 
+# Daily SMS summary via Africa's Talking (username "sandbox" uses their test environment).
+AT_USERNAME = config('AT_USERNAME', default='')
+AT_API_KEY = config('AT_API_KEY', default='')
+AT_SENDER_ID = config('AT_SENDER_ID', default='')
+SMS_RECIPIENTS = config('SMS_RECIPIENTS', default='', cast=Csv())
+
 # Media files (uploaded receipt images, etc.)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'

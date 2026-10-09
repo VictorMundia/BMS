@@ -1,14 +1,19 @@
+import io
+import json
 from datetime import date, timedelta
 from decimal import Decimal
 from io import StringIO
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from .management.commands.send_daily_summary import build_daily_summary
 from .models import (
-    BuyingPrice, Butchery, DailyBranchSummary, DailyStock, DailyTransfer, DatePermission,
+    AuditLog, BuyingPrice, Butchery, DailyBranchSummary, DailyStock, DailyTransfer, DatePermission,
     Expense, MeatCategory, MeatProduct, Staff,
 )
 from .views import _business_date, _entry_status_grid
@@ -367,6 +372,82 @@ class MissedDayGateTests(TestCase):
         DailyBranchSummary.objects.all().delete()
         self.post(self.butcher, self.today)
         self.assertTrue(self.saved(self.today))
+
+
+@override_settings(
+    AT_USERNAME='bms', AT_API_KEY='test-key', AT_SENDER_ID='', SMS_RECIPIENTS=['+254700000001'],
+)
+class DailySummarySMSTests(TestCase):
+    def setUp(self):
+        self.day = _business_date() - timedelta(days=1)
+        self.owner = User.objects.create_superuser('owner', password='pw-owner-123')
+        self.main = Butchery.objects.create(name='Main', location='Town', phone='1')
+        self.idle = Butchery.objects.create(name='Idle', location='Village', phone='2')
+        self.shut = Butchery.objects.create(name='Shut', location='Hill', phone='3')
+        cat = MeatCategory.objects.create(name='Beef')
+        beef = MeatProduct.objects.create(
+            category=cat, name='Beef', buying_price=Decimal('500'),
+            selling_price=Decimal('700'), butchery=self.main,
+        )
+        DailyStock.objects.create(
+            product=beef, date=self.day, opening_stock=0, received=10, closing_stock=4,
+            selling_price=Decimal('700'), buying_price=Decimal('500'),
+        )
+        DailyBranchSummary.objects.create(
+            butchery=self.main, date=self.day, mpesa_amount=Decimal('1000'), cash_counted=Decimal('2900'),
+        )
+        Expense.objects.create(butchery=self.main, date=self.day, amount=Decimal('200'), description='Charcoal')
+        DailyBranchSummary.objects.create(butchery=self.shut, date=self.day, is_closed=True)
+
+    def fake_response(self, status_code=101):
+        body = json.dumps({'SMSMessageData': {'Message': 'Sent to 1/1', 'Recipients': [
+            {'statusCode': status_code, 'number': '+254700000001', 'status': 'Success' if status_code == 101 else 'InsufficientBalance', 'cost': 'KES 0.8000'},
+        ]}}).encode()
+        response = mock.MagicMock()
+        response.__enter__.return_value = io.BytesIO(body)
+        return response
+
+    def test_message_content(self):
+        msg = build_daily_summary(self.day)
+        self.assertIn('Main: Sales 4,200 | Mpesa 1,000 | Exp 200 | Cash diff -100', msg)
+        self.assertIn('Idle: NOT ENTERED', msg)
+        self.assertIn('Shut: No trading', msg)
+        self.assertIn('TOTAL Sales 4,200 | Net profit 1,000', msg)
+
+    def test_dry_run_does_not_send(self):
+        out = StringIO()
+        with mock.patch('urllib.request.urlopen') as urlopen:
+            call_command('send_daily_summary', '--dry-run', stdout=out)
+        urlopen.assert_not_called()
+        self.assertIn('Main: Sales', out.getvalue())
+
+    def test_sends_and_logs(self):
+        with mock.patch('urllib.request.urlopen', return_value=self.fake_response()) as urlopen:
+            call_command('send_daily_summary', stdout=StringIO())
+        request = urlopen.call_args[0][0]
+        self.assertEqual(request.full_url, 'https://api.africastalking.com/version1/messaging')
+        self.assertEqual(request.get_header('Apikey'), 'test-key')
+        self.assertIn(b'to=%2B254700000001', request.data)
+        self.assertTrue(AuditLog.objects.filter(action='SMS_SUMMARY_SENT').exists())
+
+    def test_failed_recipient_raises_and_logs(self):
+        with mock.patch('urllib.request.urlopen', return_value=self.fake_response(405)):
+            with self.assertRaises(CommandError):
+                call_command('send_daily_summary', stdout=StringIO())
+        log = AuditLog.objects.get(action='SMS_SUMMARY_FAILED')
+        self.assertIn('InsufficientBalance', log.description)
+        self.assertNotIn('test-key', log.description)
+
+    @override_settings(AT_API_KEY='')
+    def test_not_configured(self):
+        with self.assertRaises(CommandError):
+            call_command('send_daily_summary', stdout=StringIO())
+
+    @override_settings(AT_USERNAME='sandbox')
+    def test_sandbox_url(self):
+        with mock.patch('urllib.request.urlopen', return_value=self.fake_response()) as urlopen:
+            call_command('send_daily_summary', stdout=StringIO())
+        self.assertIn('sandbox', urlopen.call_args[0][0].full_url)
 
 
 class DuplicateExpenseCommandTests(TestCase):
