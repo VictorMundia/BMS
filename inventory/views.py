@@ -11,7 +11,7 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import F, Sum, Q, DecimalField, ExpressionWrapper
+from django.db.models import F, Min, Sum, Q, DecimalField, ExpressionWrapper
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
@@ -277,6 +277,58 @@ def _dashboard_context(date, branch_id=None):
     return {'date': date, 'per_branch': per_branch, 'totals': totals, 'selected_branch_id': branch_id}
 
 
+MISSING_RANGE_CHOICES = (7, 14, 30)
+
+
+def _entry_status_grid(days):
+    """Per-branch daily entry status for the last `days` business days, newest first.
+
+    Statuses: submitted, closed, missing, today (current day not entered yet),
+    none (before the branch's first ever entry).
+    """
+    today = _business_date()
+    start = today - timedelta(days=days - 1)
+    dates = [today - timedelta(days=i) for i in range(days)]
+
+    closed = {}
+    for b_id, d, is_closed in DailyBranchSummary.objects.filter(
+        date__range=(start, today)
+    ).values_list('butchery_id', 'date', 'is_closed'):
+        closed[(b_id, d)] = is_closed
+    entered = set(
+        DailyStock.objects.filter(date__range=(start, today))
+        .values_list('product__butchery_id', 'date').distinct()
+    ) | set(closed)
+
+    first_entry = {}
+    for model, field in ((DailyStock, 'product__butchery_id'), (DailyBranchSummary, 'butchery_id')):
+        for b_id, first in model.objects.values(field).annotate(first=Min('date')).values_list(field, 'first'):
+            if b_id not in first_entry or first < first_entry[b_id]:
+                first_entry[b_id] = first
+
+    rows = []
+    for branch in Butchery.objects.order_by('name'):
+        first = first_entry.get(branch.id)
+        cells, missing = [], 0
+        for d in dates:
+            if (branch.id, d) in entered:
+                status = 'closed' if closed.get((branch.id, d)) else 'submitted'
+            elif first is None or d < first:
+                status = 'none'
+            elif d == today:
+                status = 'today'
+            else:
+                status = 'missing'
+                missing += 1
+            cells.append({'date': d, 'status': status})
+        rows.append({'branch': branch, 'cells': cells, 'missing': missing, 'never_entered': first is None})
+    return {
+        'status_dates': dates,
+        'status_rows': rows,
+        'missing_total': sum(r['missing'] for r in rows),
+    }
+
+
 def login_view(request):
     if request.method == 'POST':
         form = AuthenticationForm(request, data=request.POST)
@@ -307,6 +359,8 @@ def home_view(request):
     """Owner's live portfolio dashboard across all branches or a specific branch."""
     date = _parse_date(request.GET.get('date')) or localdate()
     branch_id = request.GET.get('branch_id')
+    missing_days = request.GET.get('missing_days', '')
+    missing_days = int(missing_days) if missing_days.isdigit() and int(missing_days) in MISSING_RANGE_CHOICES else 14
     ctx = _dashboard_context(date, branch_id)
     ctx.update({
         'recent_activities': StockMovement.objects.select_related('product')[:8],
@@ -315,6 +369,9 @@ def home_view(request):
         'is_today': date == localdate(),
         'pending_transfers': StockTransfer.objects.filter(status='PENDING').count(),
         'branches': Butchery.objects.all(),
+        'missing_days': missing_days,
+        'missing_range_choices': MISSING_RANGE_CHOICES,
+        **_entry_status_grid(missing_days),
     }
     )
     return render(request, 'home.html', ctx)

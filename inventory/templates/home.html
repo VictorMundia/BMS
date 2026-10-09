@@ -112,6 +112,77 @@
     </div>
 </div>
 
+<div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-8" id="missing-entries">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+            <h2 class="text-lg font-semibold text-gray-900">Missing Entries</h2>
+            <p class="text-sm {% if missing_total %}text-red-600{% else %}text-green-700{% endif %}">
+                {% if missing_total %}{{ missing_total }} missing entr{{ missing_total|pluralize:"y,ies" }} in the last {{ missing_days }} days.{% else %}All branches entered data for the last {{ missing_days }} days.{% endif %}
+            </p>
+        </div>
+        <form method="get" action="#missing-entries" class="flex items-center gap-2">
+            <input type="hidden" name="date" value="{{ date_str }}">
+            {% if selected_branch_id %}<input type="hidden" name="branch_id" value="{{ selected_branch_id }}">{% endif %}
+            <label class="text-xs text-gray-500">Show last</label>
+            <select name="missing_days" onchange="this.form.submit()" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg p-2">
+                {% for n in missing_range_choices %}
+                <option value="{{ n }}" {% if n == missing_days %}selected{% endif %}>{{ n }} days</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="text-xs text-center text-gray-600">
+            <thead class="text-gray-700 bg-gray-50">
+                <tr>
+                    <th class="px-3 py-2 text-left sticky left-0 bg-gray-50">Branch</th>
+                    {% for d in status_dates %}
+                    <th class="px-2 py-2 whitespace-nowrap">{{ d|date:"D" }}<br>{{ d|date:"j M" }}</th>
+                    {% endfor %}
+                    <th class="px-3 py-2">Missing</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in status_rows %}
+                <tr class="border-b">
+                    <td class="px-3 py-2 text-left font-medium text-gray-900 whitespace-nowrap sticky left-0 bg-white">
+                        {{ row.branch.name }}
+                        {% if row.never_entered %}<span class="block text-gray-400 font-normal">No entries yet</span>{% endif %}
+                    </td>
+                    {% for cell in row.cells %}
+                    <td class="px-1 py-1">
+                        {% if cell.status == 'none' %}
+                            <span class="block w-9 h-7 leading-7 rounded text-gray-300" title="Before first entry">–</span>
+                        {% else %}
+                        <a href="{% if cell.status == 'missing' or cell.status == 'today' %}{% url 'daily_stock_entry' %}?butchery={{ row.branch.id }}{% else %}{% url 'daily_stock_readonly' %}?butchery_id={{ row.branch.id }}{% endif %}&date={{ cell.date|date:'Y-m-d' }}"
+                           title="{{ row.branch.name }} {{ cell.date|date:'D j M' }}: {{ cell.status|capfirst }}"
+                           class="block w-9 h-7 leading-7 rounded font-semibold
+                           {% if cell.status == 'missing' %}bg-red-100 text-red-700 hover:bg-red-200
+                           {% elif cell.status == 'closed' %}bg-gray-200 text-gray-700 hover:bg-gray-300
+                           {% elif cell.status == 'today' %}bg-yellow-50 text-yellow-700 hover:bg-yellow-100
+                           {% else %}bg-green-100 text-green-700 hover:bg-green-200{% endif %}">
+                            {% if cell.status == 'missing' %}&#10007;{% elif cell.status == 'closed' %}&#128274;{% elif cell.status == 'today' %}&hellip;{% else %}&#10003;{% endif %}
+                        </a>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                    <td class="px-3 py-2 font-semibold {% if row.missing %}text-red-600{% else %}text-green-700{% endif %}">{{ row.missing }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="99" class="px-4 py-3 text-gray-400">No branches yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="text-xs text-gray-400 mt-3">
+        <span class="text-green-700">&#10003; Submitted</span> &middot;
+        <span class="text-gray-700">&#128274; Closed</span> &middot;
+        <span class="text-red-700">&#10007; Missing</span> &middot;
+        <span class="text-yellow-700">&hellip; Today, not entered yet</span> &middot;
+        Click a day to open it.
+    </p>
+</div>
+
 <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h2>
     <div class="overflow-x-auto">

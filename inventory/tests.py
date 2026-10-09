@@ -11,7 +11,7 @@ from .models import (
     BuyingPrice, Butchery, DailyBranchSummary, DailyStock, DailyTransfer, DatePermission,
     Expense, MeatCategory, MeatProduct, Staff,
 )
-from .views import _business_date
+from .views import _business_date, _entry_status_grid
 
 
 class DailyEntryTests(TestCase):
@@ -223,6 +223,49 @@ class DailyEntryTests(TestCase):
             f"{self.url}?butchery={self.other.id}",
         ):
             self.assertEqual(self.client.get(url).status_code, 200, url)
+
+
+class MissingEntriesGridTests(TestCase):
+    def setUp(self):
+        self.today = _business_date()
+        self.owner = User.objects.create_superuser('owner', password='pw-owner-123')
+        self.main = Butchery.objects.create(name='Main', location='Town', phone='1')
+        self.new = Butchery.objects.create(name='New', location='Village', phone='2')
+
+    def summary(self, branch, days_ago, **kw):
+        DailyBranchSummary.objects.create(butchery=branch, date=self.today - timedelta(days=days_ago), **kw)
+
+    def statuses(self, grid, branch):
+        row = next(r for r in grid['status_rows'] if r['branch'] == branch)
+        return [c['status'] for c in row['cells']], row['missing']
+
+    def test_statuses(self):
+        self.summary(self.main, 5)
+        self.summary(self.main, 3)
+        self.summary(self.main, 1, is_closed=True)
+        grid = _entry_status_grid(7)
+        statuses, missing = self.statuses(grid, self.main)
+        # newest first: today, 1..6 days ago
+        self.assertEqual(statuses, ['today', 'closed', 'missing', 'submitted', 'missing', 'submitted', 'none'])
+        self.assertEqual(missing, 2)
+
+    def test_branch_without_entries_is_not_counted(self):
+        self.summary(self.main, 0)
+        grid = _entry_status_grid(7)
+        statuses, missing = self.statuses(grid, self.new)
+        self.assertEqual(set(statuses), {'none'})
+        self.assertEqual(missing, 0)
+        self.assertEqual(grid['missing_total'], 0)
+
+    def test_dashboard_shows_panel_and_range(self):
+        self.summary(self.main, 3)
+        self.client.force_login(self.owner)
+        resp = self.client.get(reverse('home'), {'missing_days': '30'})
+        self.assertContains(resp, 'Missing Entries')
+        self.assertEqual(len(resp.context['status_dates']), 30)
+        self.assertEqual(resp.context['missing_total'], 2)
+        resp = self.client.get(reverse('home'), {'missing_days': '999'})
+        self.assertEqual(resp.context['missing_days'], 14)
 
 
 class DuplicateExpenseCommandTests(TestCase):
